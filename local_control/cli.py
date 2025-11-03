@@ -1,5 +1,5 @@
 """
-Command-line entry point for launching the LAN control server.
+Command-line entry point for launching the local control server.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from .app import create_app
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Start the LAN Control server to steer this machine remotely.",
+        description="Start the local Control server to steer this machine remotely.",
     )
     parser.add_argument(
         "--host",
