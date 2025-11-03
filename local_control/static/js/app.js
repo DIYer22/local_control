@@ -15,7 +15,7 @@
   const realtimeInput = document.getElementById("realtime-input");
 
   let authenticated = false;
-  const EDGE_RELEASE_RATIO = 0.1;
+  const EDGE_RELEASE_RATIO = 0.05;
   const EDGE_RELEASE_DELAY_MS = 100;
   const EDGE_BUFFER_PX = 2;
   let lastRemoteState = null;
