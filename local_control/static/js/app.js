@@ -73,6 +73,11 @@
     return document.pointerLockElement === trackpad;
   }
 
+  function setPointerSyncState(active) {
+    if (!trackpad) return;
+    trackpad.classList.toggle("pointer-sync", Boolean(active));
+  }
+
   function cancelEdgeRelease() {
     if (edgeReleaseTimer) {
       clearTimeout(edgeReleaseTimer);
@@ -98,6 +103,7 @@
       }
       resetEdgeTracking();
       releaseAllActiveKeys();
+      releaseAllModifiers();
     }, EDGE_RELEASE_DELAY_MS);
   }
 
@@ -176,6 +182,16 @@
       );
     }
     activeKeys.clear();
+  }
+
+  function releaseAllModifiers() {
+    if (!heldModifiers.size) return;
+    for (const key of heldModifiers) {
+      api("/api/keyboard/key", { key, action: "up" }).catch((err) =>
+        console.error("Release modifier failed", err)
+      );
+    }
+    heldModifiers.clear();
   }
 
   function handleRemoteState(state, movement) {
@@ -322,6 +338,7 @@
       }
     }
     releaseAllActiveKeys();
+    releaseAllModifiers();
   }
 
   async function checkSession() {
@@ -487,6 +504,8 @@
           );
         }
       }
+      releaseAllActiveKeys();
+      releaseAllModifiers();
     }
     if (event.pointerType === "mouse") {
       const buttonMap = {
@@ -540,18 +559,52 @@
       resetEdgeTracking();
       refreshState();
       activeKeys.clear();
+      releaseAllModifiers();
+      setPointerSyncState(true);
     } else {
       pointerActive = false;
       pendingDelta = { x: 0, y: 0 };
       lastPoint = { x: 0, y: 0 };
       resetEdgeTracking();
       releaseAllActiveKeys();
+      releaseAllModifiers();
+      setPointerSyncState(false);
     }
   });
 
   document.addEventListener("pointerlockerror", (event) => {
     console.warn("Pointer lock error", event);
     pointerActive = false;
+    releaseAllActiveKeys();
+    releaseAllModifiers();
+    setPointerSyncState(false);
+  });
+
+  window.addEventListener("blur", () => {
+    if (!authenticated) return;
+    releaseAllActiveKeys();
+    releaseAllModifiers();
+    if (isPointerLocked()) {
+      try {
+        document.exitPointerLock();
+      } catch (err) {
+        console.warn("Failed to exit pointer lock on blur", err);
+      }
+    }
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (!authenticated || !document.hidden) return;
+    releaseAllActiveKeys();
+    releaseAllModifiers();
+    if (isPointerLocked()) {
+      try {
+        document.exitPointerLock();
+      } catch (err) {
+        console.warn("Failed to exit pointer lock on hide", err);
+      }
+    }
+    setPointerSyncState(false);
   });
 
   // Keyboard handling -------------------------------------------------------
@@ -617,6 +670,20 @@
           console.error("Realtime special key failed", err),
         );
         event.preventDefault();
+        return;
+      }
+
+      const normalized = normalizeKeyForAction(event.key);
+      const usingCombo =
+        normalized && (event.ctrlKey || event.metaKey || event.altKey);
+      if (usingCombo) {
+        if (!event.repeat && !activeKeys.has(normalized)) {
+          activeKeys.add(normalized);
+          api("/api/keyboard/key", { key: normalized, action: "down" }).catch(
+            (err) => console.error("Realtime combo down failed", err),
+          );
+        }
+        event.preventDefault();
       }
     });
 
@@ -631,7 +698,23 @@
           );
         }
         event.preventDefault();
+        return;
       }
+
+      const normalized = normalizeKeyForAction(event.key);
+      if (normalized && activeKeys.has(normalized)) {
+        activeKeys.delete(normalized);
+        api("/api/keyboard/key", { key: normalized, action: "up" }).catch((err) =>
+          console.error("Realtime combo up failed", err),
+        );
+        event.preventDefault();
+      }
+    });
+
+    realtimeInput.addEventListener("blur", () => {
+      if (!authenticated) return;
+      releaseAllActiveKeys();
+      releaseAllModifiers();
     });
   }
 
@@ -687,8 +770,21 @@
       return;
     }
 
+    const normalized = normalizeKeyForAction(event.key);
+    const usingCombo =
+      normalized && (event.ctrlKey || event.metaKey || event.altKey);
+    if (usingCombo) {
+      if (!event.repeat && !activeKeys.has(normalized)) {
+        activeKeys.add(normalized);
+        api("/api/keyboard/key", { key: normalized, action: "down" }).catch((err) =>
+          console.error("Combo key down failed", err)
+        );
+      }
+      event.preventDefault();
+      return;
+    }
+
     if (isPointerLocked()) {
-      const normalized = normalizeKeyForAction(event.key);
       if (normalized) {
         if (!event.repeat && !activeKeys.has(normalized)) {
           activeKeys.add(normalized);

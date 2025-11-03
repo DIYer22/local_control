@@ -135,6 +135,68 @@ button.danger {
   color: rgba(255, 255, 255, 0.6);
   user-select: none;
   touch-action: none;
+  overflow: hidden;
+}
+
+#trackpad .trackpad-hint {
+  transition: opacity 0.25s ease;
+  pointer-events: none;
+}
+
+#trackpad.pointer-sync .trackpad-hint {
+  opacity: 0;
+}
+
+#pointer-sync-indicator {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 1.2rem;
+  text-align: center;
+  color: rgba(245, 245, 245, 0.85);
+  padding: 1.5rem;
+  opacity: 0;
+  transform: scale(0.95);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  pointer-events: none;
+}
+
+#trackpad.pointer-sync #pointer-sync-indicator {
+  opacity: 1;
+  transform: scale(1);
+}
+
+#pointer-sync-indicator p {
+  margin: 0;
+  font-size: 0.95rem;
+  max-width: 22rem;
+  color: rgba(245, 245, 245, 0.75);
+}
+
+#pointer-sync-indicator .blackhole {
+  width: clamp(120px, 40vw, 200px);
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at center, rgba(255, 255, 255, 0.2) 0%, rgba(20, 40, 30, 0.8) 55%, rgba(0, 0, 0, 0.95) 70%, rgba(0, 0, 0, 0) 85%),
+    conic-gradient(from 0deg, rgba(74, 214, 109, 0.1), rgba(74, 214, 109, 0.25), rgba(74, 214, 109, 0.05), rgba(74, 214, 109, 0.25), rgba(74, 214, 109, 0.05));
+  position: relative;
+  box-shadow:
+    0 0 40px rgba(74, 214, 109, 0.25),
+    inset 0 0 35px rgba(0, 0, 0, 0.8);
+  animation: swirl 6s linear infinite;
+}
+
+#pointer-sync-indicator .blackhole::after {
+  content: "";
+  position: absolute;
+  inset: 25%;
+  border-radius: 50%;
+  background: radial-gradient(circle at center, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0) 100%);
+  box-shadow: inset 0 0 35px rgba(0, 0, 0, 0.9);
 }
 
 .controls {
@@ -195,6 +257,15 @@ button.danger {
 
   .system-actions button {
     flex: 1;
+  }
+}
+
+@keyframes swirl {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  100% {
+    transform: rotate(360deg) scale(1.03);
   }
 }
 

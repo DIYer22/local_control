@@ -42,7 +42,13 @@
         <div class="control-layout">
           <div class="trackpad-wrapper">
             <div id="trackpad" role="application" aria-label="Trackpad surface">
-              <span>Drag to move, tap for click.</span>
+              <span class="trackpad-hint">Drag to move, tap for click.</span>
+              <div id="pointer-sync-indicator" aria-hidden="true">
+                <div class="blackhole"></div>
+                <p>
+                  Pointer synced. Push against any screen edge or press Esc to escape the lock.
+                </p>
+              </div>
             </div>
           </div>
 

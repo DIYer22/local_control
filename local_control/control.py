@@ -313,6 +313,7 @@ class _DarwinBackend(_BaseBackend):
     kCGMouseButtonLeft = 0
     kCGMouseButtonRight = 1
 
+    kCGScrollEventUnitPixel = 0
     kCGScrollEventUnitLine = 1
 
     _KEY_MAP: Dict[str, int] = {
@@ -503,13 +504,26 @@ class _DarwinBackend(_BaseBackend):
     def scroll(self, vertical: float = 0.0, horizontal: float = 0.0) -> None:
         if not vertical and not horizontal:
             return
-        # Invert vertical to match typical scrolling direction.
-        vert = int(round(-vertical))
-        if vert == 0 and vertical:
-            vert = -1 if vertical > 0 else 1
-        horiz = int(round(horizontal))
-        if horiz == 0 and horizontal:
-            horiz = 1 if horizontal > 0 else -1
+
+        def _normalize(value: float, invert: bool = False) -> int:
+            """
+            Convert browser wheel deltas (typically ~120 per detent) into smaller
+            macOS-friendly increments. The divisor keeps physical scroll wheels from
+            jumping entire pages while still allowing smooth trackpad gestures.
+            """
+            if value == 0.0:
+                return 0
+            divisor = 40.0
+            scaled = value / divisor
+            if invert:
+                scaled = -scaled
+            rounded = int(round(scaled))
+            if rounded == 0:
+                rounded = -1 if scaled < 0 else 1
+            return rounded
+
+        vert = _normalize(vertical, invert=True)
+        horiz = _normalize(horizontal)
         event = self._quartz.CGEventCreateScrollWheelEvent(
             None,
             self.kCGScrollEventUnitLine,
