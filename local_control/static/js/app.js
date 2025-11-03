@@ -677,10 +677,9 @@
       const usingCombo =
         normalized && (event.ctrlKey || event.metaKey || event.altKey);
       if (usingCombo) {
-        if (!event.repeat && !activeKeys.has(normalized)) {
-          activeKeys.add(normalized);
-          api("/api/keyboard/key", { key: normalized, action: "down" }).catch(
-            (err) => console.error("Realtime combo down failed", err),
+        if (!event.repeat) {
+          api("/api/keyboard/key", { key: normalized, action: "press" }).catch(
+            (err) => console.error("Realtime combo press failed", err),
           );
         }
         event.preventDefault();
@@ -701,14 +700,6 @@
         return;
       }
 
-      const normalized = normalizeKeyForAction(event.key);
-      if (normalized && activeKeys.has(normalized)) {
-        activeKeys.delete(normalized);
-        api("/api/keyboard/key", { key: normalized, action: "up" }).catch((err) =>
-          console.error("Realtime combo up failed", err),
-        );
-        event.preventDefault();
-      }
     });
 
     realtimeInput.addEventListener("blur", () => {
@@ -774,10 +765,9 @@
     const usingCombo =
       normalized && (event.ctrlKey || event.metaKey || event.altKey);
     if (usingCombo) {
-      if (!event.repeat && !activeKeys.has(normalized)) {
-        activeKeys.add(normalized);
-        api("/api/keyboard/key", { key: normalized, action: "down" }).catch((err) =>
-          console.error("Combo key down failed", err)
+      if (!event.repeat) {
+        api("/api/keyboard/key", { key: normalized, action: "press" }).catch((err) =>
+          console.error("Combo key press failed", err)
         );
       }
       event.preventDefault();
