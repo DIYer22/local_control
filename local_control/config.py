@@ -10,7 +10,7 @@ import platform
 from pathlib import Path
 from typing import Any
 
-APP_NAME = "lan_control"
+APP_NAME = "local_control"
 
 
 def data_dir() -> Path:

@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "lan-control"
+name = "local_control"
 version = "0.1.1"
 description = "LAN-accessible remote control server for mouse, keyboard, and power management"
 readme = "README.md"
@@ -20,4 +20,4 @@ dependencies = [
 Homepage = "https://example.com/lan-control"
 
 [project.scripts]
-lan-control = "lan_control.cli:main"
+local-control = "local_control.cli:main"
