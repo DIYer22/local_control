@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LAN Control</title>
+    <link rel="stylesheet" href="/static/css/styles.css" />
+  </head>
+  <body>
+    <main>
+      <section id="login-view">
+        <h1>LAN Control</h1>
+        <form id="login-form">
+          <label>
+            Username
+            <input type="text" id="username" autocomplete="username" required />
+          </label>
+          <label>
+            Password
+            <input type="password" id="password" autocomplete="current-password" required />
+          </label>
+          <label class="remember">
+            <input type="checkbox" id="remember" />
+            Remember this device
+          </label>
+          <button type="submit">Sign In</button>
+          <p id="login-error" class="error" aria-live="assertive"></p>
+        </form>
+      </section>
+
+      <section id="control-view" hidden>
+        <header>
+          <div>
+            <h2>Remote Pad</h2>
+            <p class="status">
+              Signed in as <span id="status-user"></span>
+            </p>
+          </div>
+          <button id="logout-button" class="secondary">Log out</button>
+        </header>
+
+        <div class="control-layout">
+          <div class="trackpad-wrapper">
+            <div id="trackpad" role="application" aria-label="Trackpad surface">
+              <span>Drag to move, tap for click.</span>
+            </div>
+          </div>
+
+          <div class="control-panel">
+            <div class="realtime">
+              <label for="realtime-input">Realtime input</label>
+              <input
+                id="realtime-input"
+                type="text"
+                autocomplete="off"
+                autocapitalize="none"
+                spellcheck="false"
+                placeholder="Focus here to stream keystrokes instantly"
+              />
+              <small>Keys send as you type; Backspace/Delete and Enter are forwarded automatically.</small>
+            </div>
+
+            <div class="controls">
+              <button data-click="left">Left Click</button>
+              <button data-click="right">Right Click</button>
+              <button data-click="double">Double Click</button>
+            </div>
+
+            <div class="keyboard">
+              <form id="type-form">
+                <label for="type-input">Type or paste text</label>
+                <textarea
+                  id="type-input"
+                  rows="3"
+                  autocomplete="off"
+                  placeholder="Paste text, then press Send or ⌘/Ctrl + Enter"
+                ></textarea>
+                <div class="keyboard-actions">
+                  <button type="submit" id="type-send">Send</button>
+                </div>
+              </form>
+              <small>Special keys (Enter, Backspace, arrows, etc.) are forwarded while this area is focused.</small>
+            </div>
+
+            <div class="system-actions">
+              <button id="unlock-button" class="secondary">Wake / Unlock</button>
+              <button id="lock-button" class="warn">Lock Screen</button>
+              <button id="shutdown-button" class="danger">Shutdown</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/js/app.js" defer></script>
+  </body>
+</html>

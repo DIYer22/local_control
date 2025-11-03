@@ -1,0 +1,25 @@
+# Python cache and artifacts
+__pycache__/
+*.py[cod]
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# IDE and editor debris
+.DS_Store
+.idea/
+.vscode/
+
+# Local caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pycache/
