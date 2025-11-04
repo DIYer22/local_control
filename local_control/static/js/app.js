@@ -23,6 +23,10 @@
   let edgeReleaseTimer = null;
   let lastClickInfo = { time: 0, button: "left" };
   const activeKeys = new Set();
+  const touches = new Map();
+  let touchSession = null;
+  let pendingScroll = { horizontal: 0, vertical: 0 };
+  let scrollFrameQueued = false;
   const specialKeys = new Map([
     ["Enter", "enter"],
     ["Backspace", "backspace"],
@@ -45,6 +49,14 @@
     ["Meta", "command"],
   ]);
   const heldModifiers = new Set();
+  const modifierTimers = new Map();
+  const TOUCH_MOVE_BASE = 0.9;
+  const TOUCH_MOVE_MIN = 1.6;
+  const TOUCH_MOVE_MAX = 10;
+  const TOUCH_SCROLL_MIN = 1.5;
+  const TOUCH_SCROLL_MAX = 6;
+  const MULTI_TAP_TIME_MS = 260;
+  const MULTI_TAP_TRAVEL_THRESHOLD = 95;
 
   async function api(path, payload) {
     const response = await fetch(path, {
@@ -76,6 +88,60 @@
   function setPointerSyncState(active) {
     if (!trackpad) return;
     trackpad.classList.toggle("pointer-sync", Boolean(active));
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function computeTouchMoveScale() {
+    if (!trackpad) return TOUCH_MOVE_MIN;
+    const rect = trackpad.getBoundingClientRect();
+    if (!rect.width || !rect.height) {
+      return TOUCH_MOVE_MIN;
+    }
+    const remoteWidth = lastRemoteState ? Number(lastRemoteState.width) : null;
+    const remoteHeight = lastRemoteState ? Number(lastRemoteState.height) : null;
+    if (!remoteWidth || !remoteHeight) {
+      const viewport = Math.max(window.innerWidth, window.innerHeight) || rect.width;
+      const base = viewport / Math.max(rect.width, rect.height);
+      return clamp(base * TOUCH_MOVE_BASE, TOUCH_MOVE_MIN, TOUCH_MOVE_MAX);
+    }
+    const scaleX = remoteWidth / rect.width;
+    const scaleY = remoteHeight / rect.height;
+    const weighted = Math.max(scaleX, scaleY) * TOUCH_MOVE_BASE;
+    return clamp(weighted, TOUCH_MOVE_MIN, TOUCH_MOVE_MAX);
+  }
+
+  function computeTouchScrollScale() {
+    const moveScale = computeTouchMoveScale();
+    return clamp(moveScale * 0.45, TOUCH_SCROLL_MIN, TOUCH_SCROLL_MAX);
+  }
+
+  function queueScrollFlush() {
+    if (scrollFrameQueued) return;
+    scrollFrameQueued = true;
+    requestAnimationFrame(flushScroll);
+  }
+
+  function flushScroll() {
+    scrollFrameQueued = false;
+    if (!authenticated) return;
+    if (
+      Math.abs(pendingScroll.horizontal) < 0.01 &&
+      Math.abs(pendingScroll.vertical) < 0.01
+    ) {
+      pendingScroll = { horizontal: 0, vertical: 0 };
+      return;
+    }
+    const payload = {
+      horizontal: pendingScroll.horizontal,
+      vertical: pendingScroll.vertical,
+    };
+    pendingScroll = { horizontal: 0, vertical: 0 };
+    api("/api/mouse/scroll", payload).catch((err) =>
+      console.error("Touch scroll failed", err)
+    );
   }
 
   function cancelEdgeRelease() {
@@ -184,14 +250,50 @@
     activeKeys.clear();
   }
 
-  function releaseAllModifiers() {
-    if (!heldModifiers.size) return;
-    for (const key of heldModifiers) {
+  function clearModifierTimer(key) {
+    const timer = modifierTimers.get(key);
+    if (timer) {
+      clearTimeout(timer);
+      modifierTimers.delete(key);
+    }
+  }
+
+  function scheduleModifierTimer(key) {
+    clearModifierTimer(key);
+    const timer = setTimeout(() => {
+      modifierTimers.delete(key);
+      if (!heldModifiers.has(key)) return;
+      heldModifiers.delete(key);
       api("/api/keyboard/key", { key, action: "up" }).catch((err) =>
-        console.error("Release modifier failed", err)
+        console.error("Auto-release modifier failed", err)
+      );
+    }, 8000);
+    modifierTimers.set(key, timer);
+  }
+
+  function modifierDown(key) {
+    if (!heldModifiers.has(key)) {
+      heldModifiers.add(key);
+      api("/api/keyboard/key", { key, action: "down" }).catch((err) =>
+        console.error("Modifier down failed", err)
       );
     }
-    heldModifiers.clear();
+    scheduleModifierTimer(key);
+  }
+
+  function modifierUp(key) {
+    if (!heldModifiers.has(key)) return;
+    heldModifiers.delete(key);
+    clearModifierTimer(key);
+    api("/api/keyboard/key", { key, action: "up" }).catch((err) =>
+      console.error("Modifier up failed", err)
+    );
+  }
+
+  function releaseAllModifiers() {
+    if (!heldModifiers.size) return;
+    const keys = Array.from(heldModifiers);
+    keys.forEach((key) => modifierUp(key));
   }
 
   function handleRemoteState(state, movement) {
@@ -445,6 +547,32 @@
     if (!authenticated) return;
     pointerActive = true;
     lastPoint = { x: event.clientX, y: event.clientY };
+    if (event.pointerType === "touch") {
+      trackpad.setPointerCapture(event.pointerId);
+      touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (!touchSession) {
+        touchSession = {
+          startTime: performance.now(),
+          maxPointers: touches.size,
+          totalTravel: 0,
+          lastPositions: new Map([[event.pointerId, { x: event.clientX, y: event.clientY }]]),
+        };
+      } else {
+        touchSession.maxPointers = Math.max(touchSession.maxPointers, touches.size);
+        touchSession.lastPositions.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      }
+      if (touches.size > 1) {
+        tapCandidate = null;
+      } else {
+        tapCandidate = {
+          startX: event.clientX,
+          startY: event.clientY,
+          time: performance.now(),
+        };
+      }
+      event.preventDefault();
+      return;
+    }
     if (event.pointerType === "mouse") {
       tapCandidate = null;
       if (typeof trackpad.requestPointerLock === "function") {
@@ -469,6 +597,53 @@
 
   function pointerMove(event) {
     if (!pointerActive) return;
+    if (event.shiftKey && heldModifiers.has("shift")) {
+      scheduleModifierTimer("shift");
+    }
+    if (event.ctrlKey && heldModifiers.has("ctrl")) {
+      scheduleModifierTimer("ctrl");
+    }
+    if (event.altKey && heldModifiers.has("alt")) {
+      scheduleModifierTimer("alt");
+    }
+    if (event.metaKey && heldModifiers.has("command")) {
+      scheduleModifierTimer("command");
+    }
+    if (event.pointerType === "touch") {
+      const current = touches.get(event.pointerId);
+      if (!current) {
+        event.preventDefault();
+        return;
+      }
+      const dxRaw = event.clientX - current.x;
+      const dyRaw = event.clientY - current.y;
+      touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (touchSession) {
+        touchSession.totalTravel += Math.abs(dxRaw) + Math.abs(dyRaw);
+        touchSession.lastPositions.set(event.pointerId, {
+          x: event.clientX,
+          y: event.clientY,
+        });
+        touchSession.maxPointers = Math.max(touchSession.maxPointers, touches.size);
+      }
+      if (Math.abs(dxRaw) < 0.01 && Math.abs(dyRaw) < 0.01) {
+        event.preventDefault();
+        return;
+      }
+      if (touches.size >= 2) {
+        const scrollScale = computeTouchScrollScale();
+        pendingScroll.horizontal += dxRaw * scrollScale;
+        pendingScroll.vertical += -dyRaw * scrollScale;
+        queueScrollFlush();
+      } else {
+        const moveScale = computeTouchMoveScale();
+        pendingDelta.x += dxRaw * moveScale;
+        pendingDelta.y += dyRaw * moveScale;
+        queueFlush();
+      }
+      event.preventDefault();
+      return;
+    }
     let dx = 0;
     let dy = 0;
     if (isPointerLocked()) {
@@ -487,13 +662,53 @@
   }
 
   function pointerUp(event) {
-    if (!pointerActive) return;
-    if (!isPointerLocked()) {
-      pointerActive = false;
+    if (!pointerActive && event.pointerType !== "touch") return;
+    let handledGesture = false;
+    if (event.pointerType === "touch") {
       if (trackpad.hasPointerCapture && trackpad.hasPointerCapture(event.pointerId)) {
         trackpad.releasePointerCapture(event.pointerId);
       }
-      if (tapCandidate) {
+      touches.delete(event.pointerId);
+      if (touchSession) {
+        touchSession.lastPositions.delete(event.pointerId);
+      }
+      const remaining = touches.size;
+      if (touchSession && remaining === 0) {
+        const duration = performance.now() - touchSession.startTime;
+        const travel = touchSession.totalTravel;
+        const maxPointers = touchSession.maxPointers;
+        touchSession = null;
+        if (maxPointers === 2 && duration < MULTI_TAP_TIME_MS && travel < MULTI_TAP_TRAVEL_THRESHOLD) {
+          api("/api/mouse/click", { button: "right" }).catch((err) =>
+            console.error("Two-finger tap failed", err)
+          );
+          handledGesture = true;
+        } else if (
+          maxPointers === 3 &&
+          duration < MULTI_TAP_TIME_MS &&
+          travel < MULTI_TAP_TRAVEL_THRESHOLD
+        ) {
+          api("/api/mouse/click", { button: "middle" }).catch((err) =>
+            console.error("Three-finger tap failed", err)
+          );
+          handledGesture = true;
+        }
+      } else if (touchSession) {
+        touchSession.maxPointers = Math.max(touchSession.maxPointers, remaining);
+      }
+      if (remaining > 0) {
+        pointerActive = true;
+        tapCandidate = null;
+        event.preventDefault();
+        return;
+      }
+    }
+    if (!isPointerLocked()) {
+      pointerActive = event.pointerType === "touch" ? touches.size > 0 : false;
+      if (trackpad.hasPointerCapture && trackpad.hasPointerCapture(event.pointerId)) {
+        trackpad.releasePointerCapture(event.pointerId);
+      }
+      if (tapCandidate && !handledGesture) {
         const dt = performance.now() - tapCandidate.time;
         const dist =
           Math.abs(event.clientX - tapCandidate.startX) +
@@ -504,8 +719,10 @@
           );
         }
       }
-      releaseAllActiveKeys();
-      releaseAllModifiers();
+      if (event.pointerType !== "touch" || touches.size === 0) {
+        releaseAllActiveKeys();
+        releaseAllModifiers();
+      }
     }
     if (event.pointerType === "mouse") {
       const buttonMap = {
@@ -654,12 +871,7 @@
       if (!authenticated) return;
       if (modifierKeys.has(event.key)) {
         const mapped = modifierKeys.get(event.key);
-        if (!heldModifiers.has(mapped)) {
-          heldModifiers.add(mapped);
-          api("/api/keyboard/key", { key: mapped, action: "down" }).catch(
-            (err) => console.error("Modifier down failed", err),
-          );
-        }
+        modifierDown(mapped);
         event.preventDefault();
         return;
       }
@@ -690,12 +902,7 @@
       if (!authenticated) return;
       if (modifierKeys.has(event.key)) {
         const mapped = modifierKeys.get(event.key);
-        if (heldModifiers.has(mapped)) {
-          heldModifiers.delete(mapped);
-          api("/api/keyboard/key", { key: mapped, action: "up" }).catch((err) =>
-            console.error("Modifier up failed", err),
-          );
-        }
+        modifierUp(mapped);
         event.preventDefault();
         return;
       }
@@ -742,12 +949,7 @@
 
     if (modifierKeys.has(event.key)) {
       const mapped = modifierKeys.get(event.key);
-      if (!heldModifiers.has(mapped)) {
-        heldModifiers.add(mapped);
-        api("/api/keyboard/key", { key: mapped, action: "down" }).catch((err) =>
-          console.error("Modifier down failed", err)
-        );
-      }
+      modifierDown(mapped);
       event.preventDefault();
       return;
     }
@@ -813,12 +1015,7 @@
 
     if (modifierKeys.has(event.key)) {
       const mapped = modifierKeys.get(event.key);
-      if (heldModifiers.has(mapped)) {
-        heldModifiers.delete(mapped);
-        api("/api/keyboard/key", { key: mapped, action: "up" }).catch((err) =>
-          console.error("Modifier up failed", err)
-        );
-      }
+      modifierUp(mapped);
       event.preventDefault();
       return;
     }
