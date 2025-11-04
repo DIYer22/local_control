@@ -1,17 +1,15 @@
-# Local Control
+# 🖱️ Local Control
 
-Local Control exposes a lightweight web application that lets you steer the local machine's mouse, send keyboard input, and trigger lock or shutdown actions from any device on the same network. The server is written in pure Python with minimal dependencies and ships with a mobile-friendly frontend.
+Let you steer the computer's mouse, keyboard from any device's browser.   
+The server is written in pure Python with minimal dependencies and ships with a mobile-friendly frontend.
 
 ## Features
 - Mouse cursor movement and click controls from touch or pointer devices.
-- Keyboard typing and special key presses transmitted to the host.
 - Realtime input field streams keystrokes (including Backspace/Delete) as you type.
-- Text pad accepts pasted multi-line snippets; send them with the on-page button or ⌘/Ctrl + Enter.
-- Desktop browsers capture the local pointer while steering and only release it after you push 10% past a screen edge (with a short 0.1s delay).
-- OS-level wake/unlock, lock, and shutdown shortcuts (best-effort across Windows, macOS, Linux).
+- OS-level lock, and shutdown shortcuts (best-effort across Windows, macOS, Linux).
 - Authentication that reuses the current OS account credentials, remembers trusted devices, and rate-limits brute-force attempts.
-- CLI launcher for quick startup on custom ports (default `4001`).
-
+- Keyboard typing and special key presses transmitted to the host.
+- 
 ## Requirements
 - Python 3.9 or newer.
 - Desktop environments capable of receiving simulated input (X11/Wayland, Windows, or macOS).
@@ -25,6 +23,7 @@ pip install .
 
 ## Usage
 ```bash
+local-control --help
 local-control --port 4001
 ```
 
