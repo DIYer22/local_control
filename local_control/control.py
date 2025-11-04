@@ -39,6 +39,8 @@ class _WindowsBackend(_BaseBackend):
     MOUSEEVENTF_LEFTUP = 0x0004
     MOUSEEVENTF_RIGHTDOWN = 0x0008
     MOUSEEVENTF_RIGHTUP = 0x0010
+    MOUSEEVENTF_MIDDLEDOWN = 0x0020
+    MOUSEEVENTF_MIDDLEUP = 0x0040
     MOUSEEVENTF_WHEEL = 0x0800
     MOUSEEVENTF_HWHEEL = 0x01000
 
@@ -152,16 +154,20 @@ class _WindowsBackend(_BaseBackend):
             raise OSError(ctypes.get_last_error())
 
     def click(self, button: str = "left", double: bool = False) -> None:
-        if button not in {"left", "right"}:
+        if button not in {"left", "middle", "right"}:
             raise ValueError(f"Unsupported button: {button}")
-        down_flag = (
-            self.MOUSEEVENTF_LEFTDOWN
-            if button == "left"
-            else self.MOUSEEVENTF_RIGHTDOWN
-        )
-        up_flag = (
-            self.MOUSEEVENTF_LEFTUP if button == "left" else self.MOUSEEVENTF_RIGHTUP
-        )
+        down_flag_map = {
+            "left": self.MOUSEEVENTF_LEFTDOWN,
+            "middle": self.MOUSEEVENTF_MIDDLEDOWN,
+            "right": self.MOUSEEVENTF_RIGHTDOWN,
+        }
+        up_flag_map = {
+            "left": self.MOUSEEVENTF_LEFTUP,
+            "middle": self.MOUSEEVENTF_MIDDLEUP,
+            "right": self.MOUSEEVENTF_RIGHTUP,
+        }
+        down_flag = down_flag_map[button]
+        up_flag = up_flag_map[button]
 
         events = []
         for _ in range(2 if double else 1):
@@ -307,11 +313,14 @@ class _DarwinBackend(_BaseBackend):
     kCGEventLeftMouseUp = 2
     kCGEventRightMouseDown = 3
     kCGEventRightMouseUp = 4
+    kCGEventOtherMouseDown = 25
+    kCGEventOtherMouseUp = 26
     kCGEventMouseMoved = 5
     kCGEventScrollWheel = 22
 
     kCGMouseButtonLeft = 0
     kCGMouseButtonRight = 1
+    kCGMouseButtonCenter = 2
 
     kCGScrollEventUnitPixel = 0
     kCGScrollEventUnitLine = 1
@@ -476,21 +485,20 @@ class _DarwinBackend(_BaseBackend):
         self._post_event(event)
 
     def click(self, button: str = "left", double: bool = False) -> None:
-        if button not in {"left", "right"}:
+        if button not in {"left", "middle", "right"}:
             raise ValueError(f"Unsupported button: {button}")
-        down_type = (
-            self.kCGEventLeftMouseDown
-            if button == "left"
-            else self.kCGEventRightMouseDown
-        )
-        up_type = (
-            self.kCGEventLeftMouseUp if button == "left" else self.kCGEventRightMouseUp
-        )
-        cg_button = (
-            self.kCGMouseButtonLeft
-            if button == "left"
-            else self.kCGMouseButtonRight
-        )
+        if button == "left":
+            down_type = self.kCGEventLeftMouseDown
+            up_type = self.kCGEventLeftMouseUp
+            cg_button = self.kCGMouseButtonLeft
+        elif button == "right":
+            down_type = self.kCGEventRightMouseDown
+            up_type = self.kCGEventRightMouseUp
+            cg_button = self.kCGMouseButtonRight
+        else:
+            down_type = self.kCGEventOtherMouseDown
+            up_type = self.kCGEventOtherMouseUp
+            cg_button = self.kCGMouseButtonCenter
 
         current = self._current_position()
         point = self.CGPoint(current.x, current.y)

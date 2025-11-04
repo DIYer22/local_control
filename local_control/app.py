@@ -20,7 +20,8 @@ from flask import (
 )
 
 from .auth import AuthManager, CredentialError, RateLimitError
-from . import control
+from . import control, clipboard
+from .clipboard import ClipboardData
 
 SESSION_COOKIE = "session_token"
 TRUSTED_COOKIE = "trusted_token"
@@ -158,6 +159,8 @@ def create_app(auth_manager: Optional[AuthManager] = None) -> Flask:
         payload = request.get_json(silent=True) or {}
         try:
             response_payload = handler(payload)
+        except ValueError as exc:
+            return build_response({"error": str(exc)}, status=400)
         except Exception as exc:  # pragma: no cover - defensive
             LOG.exception("Handler error: %s", exc)
             return build_response({"error": str(exc)}, status=500)
@@ -240,6 +243,37 @@ def create_app(auth_manager: Optional[AuthManager] = None) -> Flask:
     def system_shutdown() -> Response:
         def action(_: Dict[str, Any]) -> Dict[str, Any]:
             control.shutdown_system()
+            return {"status": "ok"}
+
+        return auth_endpoint(action)
+
+    @app.get("/api/clipboard")
+    def clipboard_read() -> Response:
+        user, fresh_token = require_auth()
+        if not user:
+            return build_response({"error": "Authentication required."}, status=401)
+        clip = clipboard.get_clipboard()
+        if clip:
+            content = {"type": clip.kind, "data": clip.data, "mime": clip.mime}
+        else:
+            content = None
+        return build_response(
+            {"status": "ok", "content": content},
+            session_token=fresh_token,
+        )
+
+    @app.post("/api/clipboard")
+    def clipboard_write() -> Response:
+        def action(data: Dict[str, Any]) -> Dict[str, Any]:
+            clip_type = str(data.get("type", "")).lower()
+            if clip_type not in {"text", "image"}:
+                raise ValueError("Clipboard type must be 'text' or 'image'.")
+            payload = data.get("data")
+            if payload is None:
+                raise ValueError("Clipboard payload missing.")
+            mime = data.get("mime")
+            clip = ClipboardData(kind=clip_type, data=str(payload), mime=str(mime) if mime else None)
+            clipboard.set_clipboard(clip)
             return {"status": "ok"}
 
         return auth_endpoint(action)

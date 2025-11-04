@@ -13,6 +13,14 @@
   const typeInput = document.getElementById("type-input");
   const typeForm = document.getElementById("type-form");
   const realtimeInput = document.getElementById("realtime-input");
+  const clipboardPullButton = document.getElementById("clipboard-pull");
+  const clipboardPushButton = document.getElementById("clipboard-push");
+  const clipboardText = document.getElementById("clipboard-text");
+  const clipboardImage = document.getElementById("clipboard-image");
+  const clipboardStatus = document.getElementById("clipboard-status");
+  const helpButton = document.getElementById("help-button");
+  const helpOverlay = document.getElementById("help-overlay");
+  const helpClose = document.getElementById("help-close");
 
   let authenticated = false;
   const EDGE_RELEASE_RATIO = 0.05;
@@ -57,6 +65,8 @@
   const TOUCH_SCROLL_MAX = 6;
   const MULTI_TAP_TIME_MS = 260;
   const MULTI_TAP_TRAVEL_THRESHOLD = 95;
+  let helpVisible = false;
+  let lastClipboardContent = null;
 
   async function api(path, payload) {
     const response = await fetch(path, {
@@ -88,6 +98,251 @@
   function setPointerSyncState(active) {
     if (!trackpad) return;
     trackpad.classList.toggle("pointer-sync", Boolean(active));
+  }
+
+  function setClipboardStatus(message, tone = "info") {
+    if (!clipboardStatus) return;
+    clipboardStatus.textContent = message || "";
+    clipboardStatus.dataset.tone = tone;
+  }
+
+  function setClipboardPreview(content, origin = "host") {
+    if (!content) {
+      if (clipboardText) {
+        clipboardText.hidden = false;
+        clipboardText.value = "";
+      }
+      if (clipboardImage) {
+        clipboardImage.src = "";
+        clipboardImage.hidden = true;
+      }
+      return;
+    }
+    lastClipboardContent = content;
+    if (content.type === "text") {
+      if (clipboardText) {
+        clipboardText.hidden = false;
+        clipboardText.value = content.data;
+      }
+      if (clipboardImage) {
+        clipboardImage.src = "";
+        clipboardImage.hidden = true;
+      }
+      setClipboardStatus(
+        origin === "device" ? "Uploaded device text to host clipboard." : "Fetched host clipboard text.",
+      );
+    } else if (content.type === "image") {
+      if (clipboardImage) {
+        const mime = content.mime || "image/png";
+        clipboardImage.src = `data:${mime};base64,${content.data}`;
+        clipboardImage.hidden = false;
+      }
+      if (clipboardText) {
+        clipboardText.hidden = true;
+        clipboardText.value = "";
+      }
+      setClipboardStatus(
+        origin === "device" ? "Uploaded device image to host clipboard." : "Fetched host clipboard image.",
+      );
+    }
+  }
+
+  function base64ToBlob(base64, mime = "application/octet-stream") {
+    const binary = atob(base64);
+    const array = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      array[i] = binary.charCodeAt(i);
+    }
+    return new Blob([array], { type: mime });
+  }
+
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result;
+        if (typeof result === "string") {
+          const base64 = result.split(",").pop();
+          resolve(base64 || "");
+        } else {
+          reject(new Error("Unsupported clipboard blob result."));
+        }
+      };
+      reader.onerror = () => reject(reader.error || new Error("Failed to convert blob to base64."));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function syncClipboardToDevice(content) {
+    if (!navigator.clipboard) {
+      setClipboardStatus("Browser clipboard API unavailable; copied content shown in preview only.", "warn");
+      return;
+    }
+    try {
+      if (content.type === "text") {
+        if (navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(content.data);
+          setClipboardStatus("Copied host text to this device clipboard.");
+        }
+      } else if (content.type === "image") {
+        const mime = content.mime || "image/png";
+        const blob = base64ToBlob(content.data, mime);
+        if (navigator.clipboard.write && window.ClipboardItem) {
+          const item = new ClipboardItem({ [blob.type]: blob });
+          await navigator.clipboard.write([item]);
+          setClipboardStatus("Copied host image to this device clipboard.");
+        } else {
+          setClipboardStatus("Clipboard image synced to preview. Browser API does not support programmatic image copy.", "warn");
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to write to device clipboard", err);
+      setClipboardStatus("Clipboard permission denied. Content available in preview.", "warn");
+    }
+  }
+
+  async function readDeviceClipboard() {
+    if (!navigator.clipboard) {
+      setClipboardStatus("Browser clipboard API unavailable.", "warn");
+      return null;
+    }
+    try {
+      if (navigator.clipboard.read) {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+          if (item.types.includes("image/png")) {
+            const blob = await item.getType("image/png");
+            const base64 = await blobToBase64(blob);
+            return { type: "image", data: base64, mime: blob.type || "image/png" };
+          }
+          if (item.types.includes("text/plain")) {
+            const blob = await item.getType("text/plain");
+            const text = await blob.text();
+            return { type: "text", data: text };
+          }
+        }
+      }
+      if (navigator.clipboard.readText) {
+        const text = await navigator.clipboard.readText();
+        if (text !== undefined && text !== null) {
+          return { type: "text", data: text };
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to read device clipboard", err);
+      setClipboardStatus("Clipboard permission denied. Paste may not transfer content.", "warn");
+      return null;
+    }
+    return null;
+  }
+
+  async function pushDeviceClipboardToHost() {
+    const local = await readDeviceClipboard();
+    if (!local) {
+      return false;
+    }
+    try {
+      await api("/api/clipboard", local);
+      setClipboardPreview(local, "device");
+      return true;
+    } catch (err) {
+      console.error("Failed to push clipboard to host", err);
+      setClipboardStatus(err.message || "Clipboard upload failed.", "warn");
+      return false;
+    }
+  }
+
+  async function pullClipboardFromHost(syncDevice = true) {
+    try {
+      const response = await fetch("/api/clipboard", { credentials: "same-origin" });
+      if (!response.ok) {
+        throw new Error(response.statusText);
+      }
+      const data = await response.json();
+      if (!data || !data.content) {
+        setClipboardStatus("Host clipboard empty.", "info");
+        setClipboardPreview(null);
+        return null;
+      }
+      const content = data.content;
+      setClipboardPreview(content, "host");
+      if (syncDevice) {
+        await syncClipboardToDevice(content);
+      }
+      return content;
+    } catch (err) {
+      console.error("Failed to fetch clipboard", err);
+      setClipboardStatus(err.message || "Unable to read host clipboard.", "warn");
+      return null;
+    }
+  }
+
+  function scheduleClipboardPull(delay = 250) {
+    window.setTimeout(() => {
+      pullClipboardFromHost(true).catch((err) =>
+        console.warn("Clipboard pull failed", err),
+      );
+    }, delay);
+  }
+
+  async function sendComboPress(key) {
+    try {
+      await api("/api/keyboard/key", { key, action: "press" });
+    } catch (err) {
+      console.error("Combo press failed", err);
+    }
+  }
+
+  function handleClipboardCombo(normalized, event) {
+    if (normalized === "v") {
+      event.preventDefault();
+      if (!event.repeat) {
+        (async () => {
+          const success = await pushDeviceClipboardToHost();
+          await sendComboPress(normalized);
+          if (!success) {
+            setClipboardStatus("Paste sent to host without clipboard payload.", "warn");
+          }
+        })();
+      }
+      return true;
+    }
+    if (normalized === "c" || normalized === "x") {
+      event.preventDefault();
+      if (!event.repeat) {
+        sendComboPress(normalized);
+        scheduleClipboardPull();
+      }
+      return true;
+    }
+    return false;
+  }
+
+  function openHelp() {
+    if (!helpOverlay) return;
+    if (isPointerLocked()) {
+      try {
+        document.exitPointerLock();
+      } catch (err) {
+        console.warn("Failed to exit pointer lock when opening help", err);
+      }
+    }
+    releaseAllActiveKeys();
+    releaseAllModifiers();
+    helpOverlay.hidden = false;
+    helpVisible = true;
+    if (helpClose) {
+      helpClose.focus();
+    }
+  }
+
+  function closeHelp() {
+    if (!helpOverlay) return;
+    helpOverlay.hidden = true;
+    helpVisible = false;
+    if (helpButton) {
+      helpButton.focus();
+    }
   }
 
   function clamp(value, min, max) {
@@ -410,13 +665,6 @@
     controlView.hidden = false;
     loginView.hidden = true;
     loginError.textContent = "";
-    if (realtimeInput) {
-      realtimeInput.focus();
-      realtimeInput.select();
-    } else if (typeInput) {
-      typeInput.focus();
-      typeInput.select();
-    }
     refreshState();
   }
 
@@ -432,6 +680,7 @@
       typeInput.value = "";
     }
     loginError.textContent = "";
+    closeHelp();
     if (isPointerLocked()) {
       try {
         document.exitPointerLock();
@@ -778,6 +1027,9 @@
       activeKeys.clear();
       releaseAllModifiers();
       setPointerSyncState(true);
+      pushDeviceClipboardToHost().catch((err) =>
+        console.warn("Clipboard push on sync entry failed", err)
+      );
     } else {
       pointerActive = false;
       pendingDelta = { x: 0, y: 0 };
@@ -786,6 +1038,9 @@
       releaseAllActiveKeys();
       releaseAllModifiers();
       setPointerSyncState(false);
+      pullClipboardFromHost(true).catch((err) =>
+        console.warn("Clipboard pull on sync exit failed", err)
+      );
     }
   });
 
@@ -889,12 +1144,12 @@
       const usingCombo =
         normalized && (event.ctrlKey || event.metaKey || event.altKey);
       if (usingCombo) {
-        if (!event.repeat) {
-          api("/api/keyboard/key", { key: normalized, action: "press" }).catch(
-            (err) => console.error("Realtime combo press failed", err),
-          );
+        if (!handleClipboardCombo(normalized, event)) {
+          if (!event.repeat) {
+            sendComboPress(normalized);
+          }
+          event.preventDefault();
         }
-        event.preventDefault();
       }
     });
 
@@ -938,8 +1193,51 @@
     });
   }
 
+  if (clipboardPullButton) {
+    clipboardPullButton.addEventListener("click", () => {
+      if (!authenticated) return;
+      pullClipboardFromHost(true);
+    });
+  }
+
+  if (clipboardPushButton) {
+    clipboardPushButton.addEventListener("click", () => {
+      if (!authenticated) return;
+      pushDeviceClipboardToHost();
+    });
+  }
+
+  if (helpButton && helpOverlay) {
+    helpButton.addEventListener("click", () => {
+      if (helpVisible) {
+        closeHelp();
+      } else {
+        openHelp();
+      }
+    });
+  }
+
+  if (helpClose) {
+    helpClose.addEventListener("click", closeHelp);
+  }
+
+  if (helpOverlay) {
+    helpOverlay.addEventListener("click", (event) => {
+      if (event.target === helpOverlay) {
+        closeHelp();
+      }
+    });
+  }
+
   document.addEventListener("keydown", (event) => {
     if (!authenticated) return;
+    if (helpVisible) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeHelp();
+      }
+      return;
+    }
     if (typeInput && event.target === typeInput) {
       return;
     }
@@ -967,12 +1265,12 @@
     const usingCombo =
       normalized && (event.ctrlKey || event.metaKey || event.altKey);
     if (usingCombo) {
-      if (!event.repeat) {
-        api("/api/keyboard/key", { key: normalized, action: "press" }).catch((err) =>
-          console.error("Combo key press failed", err)
-        );
+      if (!handleClipboardCombo(normalized, event)) {
+        if (!event.repeat) {
+          sendComboPress(normalized);
+        }
+        event.preventDefault();
       }
-      event.preventDefault();
       return;
     }
 
@@ -1006,6 +1304,9 @@
 
   document.addEventListener("keyup", (event) => {
     if (!authenticated) return;
+    if (helpVisible) {
+      return;
+    }
     if (typeInput && event.target === typeInput) {
       return;
     }
@@ -1029,6 +1330,10 @@
       event.preventDefault();
     }
   });
+
+  if (clipboardStatus) {
+    setClipboardStatus("");
+  }
 
   checkSession();
 })();

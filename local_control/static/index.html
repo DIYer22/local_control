@@ -4,6 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Local Control</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120'%3E%3Ctext y='1em' font-size='96'%3E%F0%9F%96%B1%EF%B8%8F%3C/text%3E%3C/svg%3E"
+    />
     <link rel="stylesheet" href="/static/css/styles.css" />
   </head>
   <body>
@@ -36,7 +40,10 @@
               Signed in as <span id="status-user"></span>
             </p>
           </div>
-          <button id="logout-button" class="secondary">Log out</button>
+          <div class="header-actions">
+            <button id="help-button" class="icon-button" aria-label="Show help">❔</button>
+            <button id="logout-button" class="secondary">Log out</button>
+          </div>
         </header>
 
         <div class="control-layout">
@@ -44,11 +51,16 @@
             <div id="trackpad" role="application" aria-label="Trackpad surface">
               <span class="trackpad-hint">Drag to move, tap for click.</span>
               <div id="pointer-sync-indicator" aria-hidden="true">
-                <!-- <div class="blackhole"></div> -->
                 <p>
                   Pointer synced. Push against any screen edge or press Esc to escape the lock.
                 </p>
               </div>
+            </div>
+            <div class="controls">
+              <button data-click="left">Left Click</button>
+              <button data-click="right">Right Click</button>
+              <button data-click="middle">Middle Click</button>
+              <button data-click="double">Double Click</button>
             </div>
           </div>
 
@@ -66,26 +78,38 @@
               <small>Keys send as you type; Backspace/Delete and Enter are forwarded automatically.</small>
             </div>
 
-            <div class="controls">
-              <button data-click="left">Left Click</button>
-              <button data-click="right">Right Click</button>
-              <button data-click="double">Double Click</button>
-            </div>
-
-            <div class="keyboard">
-              <form id="type-form">
-                <label for="type-input">Type or paste text</label>
+            <form id="type-form" class="keyboard">
+              <label for="type-input">Type or paste text</label>
+              <div class="type-input-wrapper">
                 <textarea
                   id="type-input"
                   rows="3"
                   autocomplete="off"
                   placeholder="Paste text, then press Send or ⌘/Ctrl + Enter"
                 ></textarea>
-                <div class="keyboard-actions">
-                  <button type="submit" id="type-send">Send</button>
-                </div>
-              </form>
+                <button type="submit" id="type-send">Send</button>
+              </div>
               <small>Special keys (Enter, Backspace, arrows, etc.) are forwarded while this area is focused.</small>
+            </form>
+
+            <div class="clipboard">
+              <div class="clipboard-header">
+                <h3>Clipboard Bridge</h3>
+                <div class="clipboard-actions">
+                  <button id="clipboard-pull" class="secondary">Pull from host</button>
+                  <button id="clipboard-push">Push to host</button>
+                </div>
+              </div>
+              <div class="clipboard-preview">
+                <textarea
+                  id="clipboard-text"
+                  rows="3"
+                  readonly
+                  placeholder="Clipboard text preview"
+                ></textarea>
+                <img id="clipboard-image" alt="Clipboard image preview" hidden />
+              </div>
+              <p id="clipboard-status" class="hint"></p>
             </div>
 
             <div class="system-actions">
@@ -96,6 +120,19 @@
           </div>
         </div>
       </section>
+      <div id="help-overlay" hidden>
+        <div class="help-panel" role="dialog" aria-modal="true" aria-labelledby="help-title">
+          <button id="help-close" class="icon-button" aria-label="Close help">✕</button>
+          <h3 id="help-title">Quick Help</h3>
+          <ul>
+            <li>Single finger swipe moves the remote cursor. Tap once to left click.</li>
+            <li>Two fingers drag to scroll. Tap with two fingers for right click.</li>
+            <li>Three-finger tap triggers a middle click. Push to screen edges to release pointer lock.</li>
+            <li>Realtime input streams keystrokes instantly; the text pad sends blocks of text.</li>
+            <li>Use the power buttons for lock, shutdown, or wake actions (wake is best-effort on macOS).</li>
+          </ul>
+        </div>
+      </div>
     </main>
 
     <script src="/static/js/app.js" defer></script>
