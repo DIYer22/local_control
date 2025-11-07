@@ -80,6 +80,47 @@
   const MULTI_TAP_TRAVEL_THRESHOLD = 95;
   let helpVisible = false;
   let lastClipboardContent = null;
+  const LOG_TEXT_LIMIT = 120;
+
+  function logEvent(topic, message, detail) {
+    const timestamp = new Date().toISOString();
+    if (detail !== undefined) {
+      console.log(`[${timestamp}] [${topic}] ${message}`, detail);
+    } else {
+      console.log(`[${timestamp}] [${topic}] ${message}`);
+    }
+  }
+
+  function summarizeTextSample(text, limit = LOG_TEXT_LIMIT) {
+    if (typeof text !== "string") {
+      return text;
+    }
+    if (text.length <= limit) {
+      return text;
+    }
+    return `${text.slice(0, limit)}… (len=${text.length})`;
+  }
+
+  function describeClipboardContent(content) {
+    if (!content) {
+      return { type: "none" };
+    }
+    if (content.type === "text") {
+      return {
+        type: "text",
+        length: content.data ? content.data.length : 0,
+        preview: summarizeTextSample(content.data || ""),
+      };
+    }
+    if (content.type === "image") {
+      return {
+        type: "image",
+        bytes: content.data ? content.data.length : 0,
+        mime: content.mime || "image/png",
+      };
+    }
+    return { type: content.type || "unknown" };
+  }
 
   async function api(path, payload) {
     const response = await fetch(path, {
@@ -121,6 +162,7 @@
 
   function setClipboardPreview(content, origin = "host") {
     if (!content) {
+      logEvent("Clipboard", "Cleared clipboard preview");
       if (clipboardText) {
         clipboardText.hidden = false;
         clipboardText.value = "";
@@ -132,6 +174,10 @@
       return;
     }
     lastClipboardContent = content;
+    logEvent("Clipboard", "Updated clipboard preview", {
+      origin,
+      ...describeClipboardContent(content),
+    });
     if (content.type === "text") {
       if (clipboardText) {
         clipboardText.hidden = false;
@@ -189,13 +235,16 @@
   async function syncClipboardToDevice(content) {
     if (!navigator.clipboard) {
       setClipboardStatus("Browser clipboard API unavailable; copied content shown in preview only.", "warn");
+      logEvent("Clipboard", "Device clipboard API unavailable");
       return;
     }
+    logEvent("Clipboard", "Syncing host clipboard to device", describeClipboardContent(content));
     try {
       if (content.type === "text") {
         if (navigator.clipboard.writeText) {
           await navigator.clipboard.writeText(content.data);
           setClipboardStatus("Copied host text to this device clipboard.");
+          logEvent("Clipboard", "Device clipboard text updated");
         }
       } else if (content.type === "image") {
         const mime = content.mime || "image/png";
@@ -204,13 +253,16 @@
           const item = new ClipboardItem({ [blob.type]: blob });
           await navigator.clipboard.write([item]);
           setClipboardStatus("Copied host image to this device clipboard.");
+          logEvent("Clipboard", "Device clipboard image updated", { mime: blob.type, bytes: blob.size });
         } else {
           setClipboardStatus("Clipboard image synced to preview. Browser API does not support programmatic image copy.", "warn");
+          logEvent("Clipboard", "Clipboard image sync limited by browser API");
         }
       }
     } catch (err) {
       console.warn("Failed to write to device clipboard", err);
       setClipboardStatus("Clipboard permission denied. Content available in preview.", "warn");
+      logEvent("Clipboard", "Failed to sync host clipboard to device", { error: err.message });
     }
   }
 
@@ -252,21 +304,26 @@
   async function pushDeviceClipboardToHost() {
     const local = await readDeviceClipboard();
     if (!local) {
+      logEvent("Clipboard", "No device clipboard content to push");
       return false;
     }
+    logEvent("Clipboard", "Pushing device clipboard to host", describeClipboardContent(local));
     try {
       await api("/api/clipboard", local);
       setClipboardPreview(local, "device");
+      logEvent("Clipboard", "Device clipboard pushed to host successfully");
       return true;
     } catch (err) {
       console.error("Failed to push clipboard to host", err);
       setClipboardStatus(err.message || "Clipboard upload failed.", "warn");
+      logEvent("Clipboard", "Failed to push clipboard to host", { error: err.message });
       return false;
     }
   }
 
   async function pullClipboardFromHost(syncDevice = true) {
     try {
+      logEvent("Clipboard", "Requesting host clipboard", { syncDevice });
       const response = await fetch("/api/clipboard", { credentials: "same-origin" });
       if (!response.ok) {
         throw new Error(response.statusText);
@@ -275,6 +332,7 @@
       if (!data || !data.content) {
         setClipboardStatus("Host clipboard empty.", "info");
         setClipboardPreview(null);
+        logEvent("Clipboard", "Host clipboard empty");
         return null;
       }
       const content = data.content;
@@ -282,10 +340,12 @@
       if (syncDevice) {
         await syncClipboardToDevice(content);
       }
+      logEvent("Clipboard", "Fetched host clipboard", describeClipboardContent(content));
       return content;
     } catch (err) {
       console.error("Failed to fetch clipboard", err);
       setClipboardStatus(err.message || "Unable to read host clipboard.", "warn");
+      logEvent("Clipboard", "Failed to fetch host clipboard", { error: err.message });
       return null;
     }
   }
@@ -300,9 +360,11 @@
 
   async function sendComboPress(key) {
     try {
+      logEvent("Keyboard", "Sending combo press", { key });
       await api("/api/keyboard/key", { key, action: "press" });
     } catch (err) {
       console.error("Combo press failed", err);
+      logEvent("Keyboard", "Combo press failed", { key, error: err.message });
     }
   }
 
@@ -310,6 +372,7 @@
     if (normalized === "v") {
       event.preventDefault();
       if (!event.repeat) {
+        logEvent("Keyboard", "Clipboard paste combo triggered");
         (async () => {
           const success = await pushDeviceClipboardToHost();
           await sendComboPress(normalized);
@@ -323,6 +386,7 @@
     if (normalized === "c" || normalized === "x") {
       event.preventDefault();
       if (!event.repeat) {
+        logEvent("Keyboard", `Clipboard ${normalized === "c" ? "copy" : "cut"} combo triggered`);
         sendComboPress(normalized);
         scheduleClipboardPull();
       }
@@ -807,6 +871,7 @@
     loginView.hidden = true;
     loginError.textContent = "";
     refreshState();
+    logEvent("Auth", "Control view shown", { username });
   }
 
   function showLogin() {
@@ -831,12 +896,14 @@
     }
     releaseAllActiveKeys();
     releaseAllModifiers();
+    logEvent("Auth", "Login view shown");
   }
 
   async function checkSession() {
     try {
       const res = await fetch("/api/session", { credentials: "same-origin" });
       const data = await res.json();
+      logEvent("Auth", "Session check result", data);
       if (data.authenticated) {
         showControl(data.username);
       } else {
@@ -855,19 +922,25 @@
     const remember = document.getElementById("remember").checked;
 
     try {
+      logEvent("Auth", "Login attempt", { username, remember });
       const data = await api("/api/login", { username, password, remember });
+      logEvent("Auth", "Login success", { username: data.username });
       showControl(data.username);
     } catch (err) {
       loginError.textContent = err.message;
+      logEvent("Auth", "Login failed", { username, error: err.message });
     }
   });
 
   logoutButton.addEventListener("click", async () => {
+    logEvent("Auth", "Logout requested");
     try {
       await api("/api/logout", {});
     } catch (err) {
       console.warn("Logout failed", err);
+      logEvent("Auth", "Logout request failed", { error: err.message });
     } finally {
+      logEvent("Auth", "Logout complete");
       showLogin();
     }
   });
@@ -880,6 +953,7 @@
         type === "double"
           ? { button: "left", double: true }
           : { button: type };
+      logEvent("Mouse", "Manual click command issued", payload);
       api("/api/mouse/click", payload).catch((err) =>
         console.error("Click failed", err)
       );
@@ -888,12 +962,14 @@
 
   lockButton.addEventListener("click", () => {
     if (!authenticated) return;
+    logEvent("System", "Lock command requested");
     api("/api/system/lock").catch((err) => alert(err.message));
   });
 
   if (unlockButton) {
     unlockButton.addEventListener("click", () => {
       if (!authenticated) return;
+      logEvent("System", "Unlock/Wake command requested");
       api("/api/system/unlock").catch((err) => alert(err.message));
     });
   }
@@ -904,6 +980,7 @@
       "Shutdown the host computer immediately? Unsaved work will be lost."
     );
     if (!confirmShutdown) return;
+    logEvent("System", "Shutdown command confirmed");
     api("/api/system/shutdown").catch((err) => alert(err.message));
   });
 
@@ -1175,10 +1252,23 @@
       lastDirectionSample = null;
       lastSanitizedVector = null;
       lastSanitizedAt = 0;
+      const activeElement = document.activeElement;
+      if (
+        activeElement &&
+        typeof activeElement.blur === "function" &&
+        activeElement !== document.body &&
+        activeElement !== trackpad
+      ) {
+        activeElement.blur();
+        logEvent("Sync", "Cleared active element focus for pointer lock", {
+          blurred: activeElement.id ? `#${activeElement.id}` : activeElement.tagName,
+        });
+      }
       refreshState();
       activeKeys.clear();
       releaseAllModifiers();
       setPointerSyncState(true);
+      logEvent("Sync", "Pointer lock acquired");
       pushDeviceClipboardToHost().catch((err) =>
         console.warn("Clipboard push on sync entry failed", err)
       );
@@ -1193,6 +1283,7 @@
       releaseAllActiveKeys();
       releaseAllModifiers();
       setPointerSyncState(false);
+      logEvent("Sync", "Pointer lock released");
       pullClipboardFromHost(true).catch((err) =>
         console.warn("Clipboard pull on sync exit failed", err)
       );
@@ -1208,12 +1299,14 @@
     releaseAllActiveKeys();
     releaseAllModifiers();
     setPointerSyncState(false);
+    logEvent("Sync", "Pointer lock error", { error: event?.name || "unknown" });
   });
 
   window.addEventListener("blur", () => {
     if (!authenticated) return;
     releaseAllActiveKeys();
     releaseAllModifiers();
+    logEvent("Sync", "Window blurred; releasing pointer lock if active");
     if (isPointerLocked()) {
       try {
         document.exitPointerLock();
@@ -1227,6 +1320,7 @@
     if (!authenticated || !document.hidden) return;
     releaseAllActiveKeys();
     releaseAllModifiers();
+    logEvent("Sync", "Document hidden; exiting pointer lock if active");
     if (isPointerLocked()) {
       try {
         document.exitPointerLock();
@@ -1246,6 +1340,10 @@
       }
       const inputType = event.inputType;
       const text = event.target.value;
+      logEvent("Keyboard", "Realtime input event", {
+        inputType,
+        text: summarizeTextSample(text),
+      });
       if (inputType === "deleteContentBackward") {
         api("/api/keyboard/key", { key: "backspace", action: "press" }).catch(
           (err) => console.error("Realtime backspace failed", err),
@@ -1272,6 +1370,9 @@
         return;
       }
       const data = event.data || realtimeInput.value;
+      logEvent("Keyboard", "Composition end", {
+        data: summarizeTextSample(data || ""),
+      });
       if (data) {
         api("/api/keyboard/type", { text: data }).catch((err) =>
           console.error("Realtime composition failed", err),
@@ -1282,6 +1383,13 @@
 
     realtimeInput.addEventListener("keydown", (event) => {
       if (!authenticated) return;
+      logEvent("Keyboard", "Realtime keydown", {
+        key: event.key,
+        repeat: event.repeat,
+        ctrl: event.ctrlKey,
+        meta: event.metaKey,
+        alt: event.altKey,
+      });
       if (modifierKeys.has(event.key)) {
         const mapped = modifierKeys.get(event.key);
         modifierDown(mapped);
@@ -1313,6 +1421,7 @@
 
     realtimeInput.addEventListener("keyup", (event) => {
       if (!authenticated) return;
+      logEvent("Keyboard", "Realtime keyup", { key: event.key });
       if (modifierKeys.has(event.key)) {
         const mapped = modifierKeys.get(event.key);
         modifierUp(mapped);
@@ -1326,6 +1435,7 @@
       if (!authenticated) return;
       releaseAllActiveKeys();
       releaseAllModifiers();
+      logEvent("Keyboard", "Realtime input blurred; modifiers released");
     });
   }
 
@@ -1335,6 +1445,10 @@
       if (!authenticated) return;
       const text = typeInput.value;
       if (!text) return;
+      logEvent("Keyboard", "Bulk text send requested", {
+        length: text.length,
+        preview: summarizeTextSample(text),
+      });
       api("/api/keyboard/type", { text })
         .then(() => {
           typeInput.value = "";
@@ -1346,6 +1460,7 @@
     typeInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
         event.preventDefault();
+        logEvent("Keyboard", "Bulk text submit shortcut pressed");
         typeForm.requestSubmit();
       }
     });
@@ -1354,6 +1469,7 @@
   if (clipboardPullButton) {
     clipboardPullButton.addEventListener("click", () => {
       if (!authenticated) return;
+      logEvent("Clipboard", "Manual host clipboard pull requested");
       pullClipboardFromHost(true);
     });
   }
@@ -1361,6 +1477,7 @@
   if (clipboardPushButton) {
     clipboardPushButton.addEventListener("click", () => {
       if (!authenticated) return;
+      logEvent("Clipboard", "Manual device clipboard push requested");
       pushDeviceClipboardToHost();
     });
   }
@@ -1389,6 +1506,14 @@
 
   document.addEventListener("keydown", (event) => {
     if (!authenticated) return;
+    logEvent("Keyboard", "Document keydown", {
+      key: event.key,
+      repeat: event.repeat,
+      ctrl: event.ctrlKey,
+      meta: event.metaKey,
+      alt: event.altKey,
+      target: event.target && event.target.id ? `#${event.target.id}` : event.target?.tagName,
+    });
     if (helpVisible) {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -1462,6 +1587,10 @@
 
   document.addEventListener("keyup", (event) => {
     if (!authenticated) return;
+    logEvent("Keyboard", "Document keyup", {
+      key: event.key,
+      target: event.target && event.target.id ? `#${event.target.id}` : event.target?.tagName,
+    });
     if (helpVisible) {
       return;
     }
