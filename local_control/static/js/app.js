@@ -26,6 +26,11 @@
   const EDGE_RELEASE_RATIO = 0.05;
   const EDGE_RELEASE_DELAY_MS = 100;
   const EDGE_BUFFER_PX = 2;
+  const POINTER_WARP_RATIO = 0.3;
+  const POINTER_WARP_MIN_THRESHOLD = 45;
+  const POINTER_JUMP_RATIO = 3.2;
+  const POINTER_JUMP_MIN_MAG = 26;
+  const POINTER_JUMP_TIME_WINDOW_MS = 180;
   let lastRemoteState = null;
   let edgeAccumulators = { left: 0, right: 0, top: 0, bottom: 0 };
   let edgeReleaseTimer = null;
@@ -35,6 +40,8 @@
   let touchSession = null;
   let pendingScroll = { horizontal: 0, vertical: 0 };
   let scrollFrameQueued = false;
+  let lastSanitizedVector = null;
+  let lastSanitizedAt = 0;
   const specialKeys = new Map([
     ["Enter", "enter"],
     ["Backspace", "backspace"],
@@ -371,6 +378,76 @@
   function computeTouchScrollScale() {
     const moveScale = computeTouchMoveScale();
     return clamp(moveScale * 0.45, TOUCH_SCROLL_MIN, TOUCH_SCROLL_MAX);
+  }
+
+  function sanitizePointerLockDelta(dx, dy) {
+    const docElement = document.documentElement;
+    const padWidth = trackpad ? trackpad.clientWidth : 0;
+    const padHeight = trackpad ? trackpad.clientHeight : 0;
+    const viewportWidth = Math.max(window.innerWidth || 0, (docElement && docElement.clientWidth) || 0);
+    const viewportHeight = Math.max(window.innerHeight || 0, (docElement && docElement.clientHeight) || 0);
+    const refWidth = Math.min(
+      padWidth || Number.POSITIVE_INFINITY,
+      viewportWidth || Number.POSITIVE_INFINITY,
+    );
+    const refHeight = Math.min(
+      padHeight || Number.POSITIVE_INFINITY,
+      viewportHeight || Number.POSITIVE_INFINITY,
+    );
+    const thresholdX = Math.max(
+      POINTER_WARP_MIN_THRESHOLD,
+      (Number.isFinite(refWidth) ? refWidth : viewportWidth) * POINTER_WARP_RATIO,
+    );
+    const thresholdY = Math.max(
+      POINTER_WARP_MIN_THRESHOLD,
+      (Number.isFinite(refHeight) ? refHeight : viewportHeight) * POINTER_WARP_RATIO,
+    );
+    let filteredDx = dx;
+    let filteredDy = dy;
+    if (Math.abs(filteredDx) >= thresholdX) {
+      filteredDx = 0;
+    }
+    if (Math.abs(filteredDy) >= thresholdY) {
+      filteredDy = 0;
+    }
+    const now = performance.now();
+    if (
+      lastSanitizedVector &&
+      now - lastSanitizedAt < POINTER_JUMP_TIME_WINDOW_MS
+    ) {
+      const prev = lastSanitizedVector;
+      const prevMag = Math.hypot(prev.dx, prev.dy);
+      const currMag = Math.hypot(filteredDx, filteredDy);
+      const prevAxis = Math.abs(prev.dx) >= Math.abs(prev.dy) ? "x" : "y";
+      const currAxis = Math.abs(filteredDx) >= Math.abs(filteredDy) ? "x" : "y";
+      const prevDominant =
+        prevAxis === "x"
+          ? Math.abs(prev.dx) >= Math.abs(prev.dy) * POINTER_JUMP_RATIO
+          : Math.abs(prev.dy) >= Math.abs(prev.dx) * POINTER_JUMP_RATIO;
+      const currDominant =
+        currAxis === "x"
+          ? Math.abs(filteredDx) >= Math.abs(filteredDy || 0) * POINTER_JUMP_RATIO
+          : Math.abs(filteredDy) >= Math.abs(filteredDx || 0) * POINTER_JUMP_RATIO;
+      if (
+        prevMag >= POINTER_JUMP_MIN_MAG &&
+        currMag >= POINTER_JUMP_MIN_MAG &&
+        prevAxis !== currAxis &&
+        prevDominant &&
+        currDominant
+      ) {
+        if (currAxis === "x") {
+          filteredDx = 0;
+        } else {
+          filteredDy = 0;
+        }
+      }
+    }
+    if (filteredDx === 0 && filteredDy === 0) {
+      return null;
+    }
+    lastSanitizedVector = { dx: filteredDx, dy: filteredDy };
+    lastSanitizedAt = now;
+    return { dx: filteredDx, dy: filteredDy };
   }
 
   function queueScrollFlush() {
@@ -896,8 +973,16 @@
     let dx = 0;
     let dy = 0;
     if (isPointerLocked()) {
-      dx = event.movementX;
-      dy = event.movementY;
+      const sanitized = sanitizePointerLockDelta(
+        event.movementX,
+        event.movementY,
+      );
+      if (!sanitized) {
+        event.preventDefault();
+        return;
+      }
+      dx = sanitized.dx;
+      dy = sanitized.dy;
     } else {
       dx = event.clientX - lastPoint.x;
       dy = event.clientY - lastPoint.y;
@@ -1023,6 +1108,8 @@
     if (isPointerLocked()) {
       pointerActive = true;
       resetEdgeTracking();
+      lastSanitizedVector = null;
+      lastSanitizedAt = 0;
       refreshState();
       activeKeys.clear();
       releaseAllModifiers();
@@ -1035,6 +1122,8 @@
       pendingDelta = { x: 0, y: 0 };
       lastPoint = { x: 0, y: 0 };
       resetEdgeTracking();
+      lastSanitizedVector = null;
+      lastSanitizedAt = 0;
       releaseAllActiveKeys();
       releaseAllModifiers();
       setPointerSyncState(false);
