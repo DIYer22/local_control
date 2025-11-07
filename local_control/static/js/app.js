@@ -31,6 +31,11 @@
   const POINTER_JUMP_RATIO = 3.2;
   const POINTER_JUMP_MIN_MAG = 26;
   const POINTER_JUMP_TIME_WINDOW_MS = 180;
+  const POINTER_DIRECTION_DECAY_MS = 160;
+  const POINTER_DIRECTION_MIN_MAG = 10;
+  const POINTER_DIRECTION_MAX_NOISE = 38;
+  const POINTER_DIRECTION_ALIGN_RATIO = 0.35;
+  const POINTER_DIRECTION_TURN_RATIO = 0.7;
   let lastRemoteState = null;
   let edgeAccumulators = { left: 0, right: 0, top: 0, bottom: 0 };
   let edgeReleaseTimer = null;
@@ -42,6 +47,7 @@
   let scrollFrameQueued = false;
   let lastSanitizedVector = null;
   let lastSanitizedAt = 0;
+  let lastDirectionSample = null;
   const specialKeys = new Map([
     ["Enter", "enter"],
     ["Backspace", "backspace"],
@@ -380,6 +386,52 @@
     return clamp(moveScale * 0.45, TOUCH_SCROLL_MIN, TOUCH_SCROLL_MAX);
   }
 
+  function rememberDirectionSample(vec, timestamp) {
+    const mag = Math.hypot(vec.dx, vec.dy);
+    if (mag < POINTER_DIRECTION_MIN_MAG) {
+      return;
+    }
+    const inv = 1 / mag;
+    lastDirectionSample = {
+      x: vec.dx * inv,
+      y: vec.dy * inv,
+      mag,
+      time: timestamp,
+    };
+  }
+
+  function suppressPerpendicularJitter(vec, timestamp) {
+    if (!lastDirectionSample) {
+      return vec;
+    }
+    if (timestamp - lastDirectionSample.time > POINTER_DIRECTION_DECAY_MS) {
+      lastDirectionSample = null;
+      return vec;
+    }
+    const mag = Math.hypot(vec.dx, vec.dy);
+    if (mag < POINTER_DIRECTION_MIN_MAG || mag > POINTER_DIRECTION_MAX_NOISE) {
+      return vec;
+    }
+    const dot = vec.dx * lastDirectionSample.x + vec.dy * lastDirectionSample.y;
+    const alignment = Math.abs(dot) / mag;
+    if (alignment >= POINTER_DIRECTION_ALIGN_RATIO) {
+      return vec;
+    }
+    if (mag > lastDirectionSample.mag * POINTER_DIRECTION_TURN_RATIO) {
+      lastDirectionSample = null;
+      return vec;
+    }
+    if (Math.abs(lastDirectionSample.x) >= Math.abs(lastDirectionSample.y)) {
+      vec.dy = 0;
+    } else {
+      vec.dx = 0;
+    }
+    if (Math.abs(vec.dx) < 0.5 && Math.abs(vec.dy) < 0.5) {
+      return null;
+    }
+    return vec;
+  }
+
   function sanitizePointerLockDelta(dx, dy) {
     const docElement = document.documentElement;
     const padWidth = trackpad ? trackpad.clientWidth : 0;
@@ -442,12 +494,24 @@
         }
       }
     }
+
+    const jitterChecked = suppressPerpendicularJitter(
+      { dx: filteredDx, dy: filteredDy },
+      now,
+    );
+    if (!jitterChecked) {
+      return null;
+    }
+    filteredDx = jitterChecked.dx;
+    filteredDy = jitterChecked.dy;
     if (filteredDx === 0 && filteredDy === 0) {
       return null;
     }
+    const result = { dx: filteredDx, dy: filteredDy };
     lastSanitizedVector = { dx: filteredDx, dy: filteredDy };
     lastSanitizedAt = now;
-    return { dx: filteredDx, dy: filteredDy };
+    rememberDirectionSample(result, now);
+    return result;
   }
 
   function queueScrollFlush() {
@@ -1108,6 +1172,7 @@
     if (isPointerLocked()) {
       pointerActive = true;
       resetEdgeTracking();
+      lastDirectionSample = null;
       lastSanitizedVector = null;
       lastSanitizedAt = 0;
       refreshState();
@@ -1122,6 +1187,7 @@
       pendingDelta = { x: 0, y: 0 };
       lastPoint = { x: 0, y: 0 };
       resetEdgeTracking();
+      lastDirectionSample = null;
       lastSanitizedVector = null;
       lastSanitizedAt = 0;
       releaseAllActiveKeys();
@@ -1136,6 +1202,9 @@
   document.addEventListener("pointerlockerror", (event) => {
     console.warn("Pointer lock error", event);
     pointerActive = false;
+    lastDirectionSample = null;
+    lastSanitizedVector = null;
+    lastSanitizedAt = 0;
     releaseAllActiveKeys();
     releaseAllModifiers();
     setPointerSyncState(false);
