@@ -23,7 +23,7 @@ The server is written in pure Python with minimal dependencies and ships with a 
 
 ## Installation
 ```bash
-pip install .
+pip install local_control
 ```
 
 ## Usage
