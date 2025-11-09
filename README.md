@@ -3,7 +3,7 @@
 Let you steer the computer's mouse, keyboard from any device's browser.   
 
 <a href="https://yl-data.github.io/2511.local_control/images/local-send-screenshot.jpeg">
-<img style="max-height:384px" src=https://yl-data.github.io/2511.local_control/images/local-send-screenshot.jpeg>
+<img style="height:384px" src=https://yl-data.github.io/2511.local_control/images/local-send-screenshot.jpeg>
 </a>
 
 The server is written in pure Python with minimal dependencies and ships with a mobile-friendly frontend.
