@@ -13,7 +13,7 @@ The server is written in pure Python with minimal dependencies and ships with a 
 - Realtime input field streams keystrokes (including Backspace/Delete) as you type.
 - OS-level lock, and shutdown shortcuts (best-effort across Windows, macOS, Linux).
 - Authentication that reuses the current OS account credentials, remembers trusted devices, and rate-limits brute-force attempts.
-- Build by GPT-5-Codex, easy to customize and modify by vibe coding.
+- Build with GPT-5-Codex, easy to customize and modify with vibe coding.
 
 ## Requirements
 - Python 3.9 or newer.
