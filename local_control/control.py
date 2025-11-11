@@ -394,13 +394,23 @@ class _DarwinBackend(_BaseBackend):
     }
 
     def __init__(self) -> None:
-        from ctypes import c_bool, c_double, c_int32, c_size_t, c_uint16, c_uint32, c_void_p
+        from ctypes import (
+            c_bool,
+            c_double,
+            c_int32,
+            c_size_t,
+            c_uint16,
+            c_uint32,
+            c_uint64,
+            c_void_p,
+        )
 
         self._c_bool = c_bool
         self._c_double = c_double
         self._c_int32 = c_int32
         self._c_uint16 = c_uint16
         self._c_uint32 = c_uint32
+        self._c_uint64 = c_uint64
         self._c_void_p = c_void_p
         self._c_size_t = c_size_t
 
@@ -455,6 +465,13 @@ class _DarwinBackend(_BaseBackend):
         self._quartz.CGDisplayPixelsWide.restype = c_size_t
         self._quartz.CGDisplayPixelsHigh.argtypes = [c_uint32]
         self._quartz.CGDisplayPixelsHigh.restype = c_size_t
+        self._quartz.CGEventSetFlags.argtypes = [c_void_p, c_uint64]
+        self._quartz.CGEventSetFlags.restype = None
+
+    def _prepare_event(self, event: ctypes.c_void_p, flags: int = 0) -> ctypes.c_void_p:
+        if event:
+            self._quartz.CGEventSetFlags(event, self._c_uint64(flags))
+        return event
 
     def _current_position(self) -> "CGPoint":
         event = self._quartz.CGEventCreate(self._c_void_p())
@@ -476,11 +493,13 @@ class _DarwinBackend(_BaseBackend):
     def move_cursor(self, dx: float, dy: float) -> None:
         current = self._current_position()
         target = self.CGPoint(current.x + dx, current.y + dy)
-        event = self._quartz.CGEventCreateMouseEvent(
-            None,
-            self.kCGEventMouseMoved,
-            target,
-            self.kCGMouseButtonLeft,
+        event = self._prepare_event(
+            self._quartz.CGEventCreateMouseEvent(
+                None,
+                self.kCGEventMouseMoved,
+                target,
+                self.kCGMouseButtonLeft,
+            )
         )
         self._post_event(event)
 
@@ -504,8 +523,12 @@ class _DarwinBackend(_BaseBackend):
         point = self.CGPoint(current.x, current.y)
 
         for _ in range(2 if double else 1):
-            down_event = self._quartz.CGEventCreateMouseEvent(None, down_type, point, cg_button)
-            up_event = self._quartz.CGEventCreateMouseEvent(None, up_type, point, cg_button)
+            down_event = self._prepare_event(
+                self._quartz.CGEventCreateMouseEvent(None, down_type, point, cg_button)
+            )
+            up_event = self._prepare_event(
+                self._quartz.CGEventCreateMouseEvent(None, up_type, point, cg_button)
+            )
             self._post_event(down_event)
             self._post_event(up_event)
 
@@ -532,12 +555,14 @@ class _DarwinBackend(_BaseBackend):
 
         vert = _normalize(vertical, invert=True)
         horiz = _normalize(horizontal)
-        event = self._quartz.CGEventCreateScrollWheelEvent(
-            None,
-            self.kCGScrollEventUnitLine,
-            2,
-            vert,
-            horiz,
+        event = self._prepare_event(
+            self._quartz.CGEventCreateScrollWheelEvent(
+                None,
+                self.kCGScrollEventUnitLine,
+                2,
+                vert,
+                horiz,
+            )
         )
         self._post_event(event)
 
@@ -548,9 +573,9 @@ class _DarwinBackend(_BaseBackend):
         units = [int.from_bytes(utf16[i : i + 2], "little") for i in range(0, len(utf16), 2)]
         buffer_type = self._c_uint16 * len(units)
         buf = buffer_type(*units)
-        down = self._quartz.CGEventCreateKeyboardEvent(None, 0, True)
+        down = self._prepare_event(self._quartz.CGEventCreateKeyboardEvent(None, 0, True))
         self._quartz.CGEventKeyboardSetUnicodeString(down, len(units), buf)
-        up = self._quartz.CGEventCreateKeyboardEvent(None, 0, False)
+        up = self._prepare_event(self._quartz.CGEventCreateKeyboardEvent(None, 0, False))
         self._quartz.CGEventKeyboardSetUnicodeString(up, len(units), buf)
         self._post_event(down)
         self._post_event(up)
@@ -562,10 +587,10 @@ class _DarwinBackend(_BaseBackend):
         if action not in {"press", "down", "up"}:
             raise ValueError(f"Unsupported action: {action}")
         if action in {"press", "down"}:
-            down = self._quartz.CGEventCreateKeyboardEvent(None, keycode, True)
+            down = self._prepare_event(self._quartz.CGEventCreateKeyboardEvent(None, keycode, True))
             self._post_event(down)
         if action in {"press", "up"}:
-            up = self._quartz.CGEventCreateKeyboardEvent(None, keycode, False)
+            up = self._prepare_event(self._quartz.CGEventCreateKeyboardEvent(None, keycode, False))
             self._post_event(up)
 
     def state(self) -> Dict[str, float]:
