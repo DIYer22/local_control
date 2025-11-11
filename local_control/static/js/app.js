@@ -36,10 +36,14 @@
   const POINTER_DIRECTION_MAX_NOISE = 38;
   const POINTER_DIRECTION_ALIGN_RATIO = 0.35;
   const POINTER_DIRECTION_TURN_RATIO = 0.7;
+  const POINTER_BUTTON_MAP = new Map([
+    [0, "left"],
+    [1, "middle"],
+    [2, "right"],
+  ]);
   let lastRemoteState = null;
   let edgeAccumulators = { left: 0, right: 0, top: 0, bottom: 0 };
   let edgeReleaseTimer = null;
-  let lastClickInfo = { time: 0, button: "left" };
   const activeKeys = new Set();
   const touches = new Map();
   let touchSession = null;
@@ -48,6 +52,7 @@
   let lastSanitizedVector = null;
   let lastSanitizedAt = 0;
   let lastDirectionSample = null;
+  const heldPointerButtons = new Set();
   const specialKeys = new Map([
     ["Enter", "enter"],
     ["Backspace", "backspace"],
@@ -152,6 +157,30 @@
   function setPointerSyncState(active) {
     if (!trackpad) return;
     trackpad.classList.toggle("pointer-sync", Boolean(active));
+  }
+
+  function pointerButtonFromEvent(event) {
+    if (!event || typeof event.button !== "number") {
+      return null;
+    }
+    return POINTER_BUTTON_MAP.get(event.button) || null;
+  }
+
+  function sendMouseButton(button, action) {
+    if (!authenticated || !button) return Promise.resolve();
+    logEvent("Mouse", "Pointer button action", { button, action });
+    return api("/api/mouse/button", { button, action }).catch((err) => {
+      console.error("Mouse button action failed", err);
+    });
+  }
+
+  function releaseAllPointerButtons() {
+    if (!heldPointerButtons.size) return;
+    const buttons = Array.from(heldPointerButtons);
+    heldPointerButtons.clear();
+    buttons.forEach((button) => {
+      sendMouseButton(button, "up");
+    });
   }
 
   function setClipboardStatus(message, tone = "info") {
@@ -1042,6 +1071,11 @@
     }
     if (event.pointerType === "mouse") {
       tapCandidate = null;
+      const button = pointerButtonFromEvent(event);
+      if (button) {
+        heldPointerButtons.add(button);
+        sendMouseButton(button, "down");
+      }
       if (typeof trackpad.requestPointerLock === "function") {
         try {
           trackpad.requestPointerLock();
@@ -1197,26 +1231,20 @@
       if (event.pointerType !== "touch" || touches.size === 0) {
         releaseAllActiveKeys();
         releaseAllModifiers();
+        releaseAllPointerButtons();
       }
     }
     if (event.pointerType === "mouse") {
-      const buttonMap = {
-        0: "left",
-        2: "right",
-      };
-      const button = buttonMap[event.button];
-      if (!button) {
-        tapCandidate = null;
-        event.preventDefault();
-        return;
+      const button = pointerButtonFromEvent(event);
+      if (button) {
+        if (heldPointerButtons.has(button)) {
+          heldPointerButtons.delete(button);
+        }
+        sendMouseButton(button, "up");
       }
-      const now = performance.now();
-      const isDouble =
-        lastClickInfo.button === button && now - lastClickInfo.time < 320;
-      lastClickInfo = { time: now, button };
-      api("/api/mouse/click", { button, double: isDouble && button === "left" }).catch(
-        (err) => console.error("Mouse click failed", err),
-      );
+      tapCandidate = null;
+      event.preventDefault();
+      return;
     }
     tapCandidate = null;
     event.preventDefault();
@@ -1280,6 +1308,7 @@
       lastDirectionSample = null;
       lastSanitizedVector = null;
       lastSanitizedAt = 0;
+      releaseAllPointerButtons();
       releaseAllActiveKeys();
       releaseAllModifiers();
       setPointerSyncState(false);
@@ -1296,6 +1325,7 @@
     lastDirectionSample = null;
     lastSanitizedVector = null;
     lastSanitizedAt = 0;
+    releaseAllPointerButtons();
     releaseAllActiveKeys();
     releaseAllModifiers();
     setPointerSyncState(false);
@@ -1306,6 +1336,7 @@
     if (!authenticated) return;
     releaseAllActiveKeys();
     releaseAllModifiers();
+    releaseAllPointerButtons();
     logEvent("Sync", "Window blurred; releasing pointer lock if active");
     if (isPointerLocked()) {
       try {
@@ -1320,6 +1351,7 @@
     if (!authenticated || !document.hidden) return;
     releaseAllActiveKeys();
     releaseAllModifiers();
+    releaseAllPointerButtons();
     logEvent("Sync", "Document hidden; exiting pointer lock if active");
     if (isPointerLocked()) {
       try {

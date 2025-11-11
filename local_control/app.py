@@ -186,6 +186,16 @@ def create_app(auth_manager: Optional[AuthManager] = None) -> Flask:
 
         return auth_endpoint(action)
 
+    @app.post("/api/mouse/button")
+    def mouse_button() -> Response:
+        def action(data: Dict[str, Any]) -> Dict[str, Any]:
+            button = str(data.get("button", "left"))
+            button_action = str(data.get("action", "down"))
+            control.button_action(button=button, action=button_action)
+            return {"status": "ok"}
+
+        return auth_endpoint(action)
+
     @app.post("/api/mouse/scroll")
     def mouse_scroll() -> Response:
         def action(data: Dict[str, Any]) -> Dict[str, Any]:

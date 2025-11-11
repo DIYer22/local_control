@@ -18,6 +18,9 @@ class _BaseBackend:
     def click(self, button: str = "left", double: bool = False) -> None:  # pragma: no cover
         raise NotImplementedError
 
+    def button_action(self, button: str, action: str) -> None:  # pragma: no cover
+        raise NotImplementedError
+
     def scroll(self, vertical: float = 0.0, horizontal: float = 0.0) -> None:  # pragma: no cover
         raise NotImplementedError
 
@@ -77,6 +80,12 @@ class _WindowsBackend(_BaseBackend):
         "period": 0xBE,
         "slash": 0xBF,
         "grave": 0xC0,
+    }
+
+    _BUTTON_FLAGS = {
+        "left": (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP),
+        "middle": (MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP),
+        "right": (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP),
     }
 
     def __init__(self) -> None:
@@ -156,18 +165,7 @@ class _WindowsBackend(_BaseBackend):
     def click(self, button: str = "left", double: bool = False) -> None:
         if button not in {"left", "middle", "right"}:
             raise ValueError(f"Unsupported button: {button}")
-        down_flag_map = {
-            "left": self.MOUSEEVENTF_LEFTDOWN,
-            "middle": self.MOUSEEVENTF_MIDDLEDOWN,
-            "right": self.MOUSEEVENTF_RIGHTDOWN,
-        }
-        up_flag_map = {
-            "left": self.MOUSEEVENTF_LEFTUP,
-            "middle": self.MOUSEEVENTF_MIDDLEUP,
-            "right": self.MOUSEEVENTF_RIGHTUP,
-        }
-        down_flag = down_flag_map[button]
-        up_flag = up_flag_map[button]
+        down_flag, up_flag = self._BUTTON_FLAGS[button]
 
         events = []
         for _ in range(2 if double else 1):
@@ -193,6 +191,25 @@ class _WindowsBackend(_BaseBackend):
             )
             events.extend([down, up])
         self._send_inputs(events)
+
+    def button_action(self, button: str, action: str) -> None:
+        if button not in self._BUTTON_FLAGS:
+            raise ValueError(f"Unsupported button: {button}")
+        if action not in {"down", "up"}:
+            raise ValueError(f"Unsupported button action: {action}")
+        down_flag, up_flag = self._BUTTON_FLAGS[button]
+        flag = down_flag if action == "down" else up_flag
+        event = self._INPUT()
+        event.type = self.INPUT_MOUSE
+        event.value.mi = self._MOUSEINPUT(
+            dx=0,
+            dy=0,
+            mouseData=0,
+            dwFlags=flag,
+            time=0,
+            dwExtraInfo=0,
+        )
+        self._send_inputs([event])
 
     def scroll(self, vertical: float = 0.0, horizontal: float = 0.0) -> None:
         if vertical:
@@ -532,6 +549,31 @@ class _DarwinBackend(_BaseBackend):
             self._post_event(down_event)
             self._post_event(up_event)
 
+    def button_action(self, button: str, action: str) -> None:
+        if button not in {"left", "middle", "right"}:
+            raise ValueError(f"Unsupported button: {button}")
+        if action not in {"down", "up"}:
+            raise ValueError(f"Unsupported button action: {action}")
+        if button == "left":
+            down_type = self.kCGEventLeftMouseDown
+            up_type = self.kCGEventLeftMouseUp
+            cg_button = self.kCGMouseButtonLeft
+        elif button == "right":
+            down_type = self.kCGEventRightMouseDown
+            up_type = self.kCGEventRightMouseUp
+            cg_button = self.kCGMouseButtonRight
+        else:
+            down_type = self.kCGEventOtherMouseDown
+            up_type = self.kCGEventOtherMouseUp
+            cg_button = self.kCGMouseButtonCenter
+        event_type = down_type if action == "down" else up_type
+        current = self._current_position()
+        point = self.CGPoint(current.x, current.y)
+        event = self._prepare_event(
+            self._quartz.CGEventCreateMouseEvent(None, event_type, point, cg_button)
+        )
+        self._post_event(event)
+
     def scroll(self, vertical: float = 0.0, horizontal: float = 0.0) -> None:
         if not vertical and not horizontal:
             return
@@ -641,6 +683,12 @@ class _X11Backend(_BaseBackend):
         "grave": "grave",
     }
 
+    _BUTTON_MAP: Dict[str, int] = {
+        "left": 1,
+        "middle": 2,
+        "right": 3,
+    }
+
     def __init__(self) -> None:
         self._x11 = ctypes.cdll.LoadLibrary("libX11.so.6")
         self._xtst = ctypes.cdll.LoadLibrary("libXtst.so.6")
@@ -722,6 +770,16 @@ class _X11Backend(_BaseBackend):
             self._xtst.XTestFakeButtonEvent(self._display, button_code, True, 0)
             self._xtst.XTestFakeButtonEvent(self._display, button_code, False, 0)
             self._flush()
+
+    def button_action(self, button: str, action: str) -> None:
+        button_code = self._BUTTON_MAP.get(button)
+        if button_code is None:
+            raise ValueError(f"Unsupported button: {button}")
+        if action not in {"down", "up"}:
+            raise ValueError(f"Unsupported button action: {action}")
+        press = 1 if action == "down" else 0
+        self._xtst.XTestFakeButtonEvent(self._display, button_code, press, 0)
+        self._flush()
 
     def scroll(self, vertical: float = 0.0, horizontal: float = 0.0) -> None:
         def _emit(button: int, count: int) -> None:
@@ -855,6 +913,10 @@ def move_cursor(dx: float, dy: float) -> Dict[str, float]:
 
 def click(button: str = "left", double: bool = False) -> None:
     _backend().click(button=button, double=double)
+
+
+def button_action(button: str, action: str) -> None:
+    _backend().button_action(button=button, action=action)
 
 
 def scroll(vertical: float = 0.0, horizontal: float = 0.0) -> None:
