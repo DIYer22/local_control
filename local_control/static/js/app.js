@@ -85,6 +85,7 @@
   const MULTI_TAP_TRAVEL_THRESHOLD = 95;
   let helpVisible = false;
   let lastClipboardContent = null;
+  let lastDeviceClipboardSignature = null;
   const LOG_TEXT_LIMIT = 120;
 
   function logEvent(topic, message, detail) {
@@ -125,6 +126,17 @@
       };
     }
     return { type: content.type || "unknown" };
+  }
+
+  function fingerprintClipboardContent(content) {
+    if (!content) return null;
+    const type = content.type || "unknown";
+    const mime = content.mime || "";
+    const data = typeof content.data === "string" ? content.data : String(content.data || "");
+    const length = data.length || 0;
+    const head = data.slice(0, 16);
+    const tail = length > 16 ? data.slice(-16) : "";
+    return `${type}|${mime}|${length}|${head}|${tail}`;
   }
 
   async function api(path, payload) {
@@ -330,10 +342,16 @@
     return null;
   }
 
-  async function pushDeviceClipboardToHost() {
+  async function pushDeviceClipboardToHost(options = {}) {
+    const { force = true, reason = "manual" } = options;
     const local = await readDeviceClipboard();
     if (!local) {
       logEvent("Clipboard", "No device clipboard content to push");
+      return false;
+    }
+    const signature = fingerprintClipboardContent(local);
+    if (!force && signature && signature === lastDeviceClipboardSignature) {
+      logEvent("Clipboard", "Device clipboard unchanged; skipping push", { reason });
       return false;
     }
     logEvent("Clipboard", "Pushing device clipboard to host", describeClipboardContent(local));
@@ -341,6 +359,7 @@
       await api("/api/clipboard", local);
       setClipboardPreview(local, "device");
       logEvent("Clipboard", "Device clipboard pushed to host successfully");
+      lastDeviceClipboardSignature = signature;
       return true;
     } catch (err) {
       console.error("Failed to push clipboard to host", err);
@@ -1297,9 +1316,14 @@
       releaseAllModifiers();
       setPointerSyncState(true);
       logEvent("Sync", "Pointer lock acquired");
-      pushDeviceClipboardToHost().catch((err) =>
-        console.warn("Clipboard push on sync entry failed", err)
+      pullClipboardFromHost(false).catch((err) =>
+        console.warn("Clipboard refresh on sync entry failed", err)
       );
+      if (navigator.clipboard && (navigator.clipboard.read || navigator.clipboard.readText)) {
+        pushDeviceClipboardToHost({ force: false, reason: "sync-entry" }).catch((err) =>
+          console.warn("Clipboard push on sync entry failed", err)
+        );
+      }
     } else {
       pointerActive = false;
       pendingDelta = { x: 0, y: 0 };

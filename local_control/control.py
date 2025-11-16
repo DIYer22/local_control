@@ -10,6 +10,9 @@ from typing import Dict, Optional, Sequence
 
 import ctypes
 
+from . import clipboard as clipboard_utils
+from .clipboard import ClipboardData
+
 
 class _BaseBackend:
     def move_cursor(self, dx: float, dy: float) -> None:  # pragma: no cover - OS specific
@@ -810,27 +813,66 @@ class _X11Backend(_BaseBackend):
             self._xtst.XTestFakeKeyEvent(self._display, self._shift_keycode, False, 0)
         self._flush()
 
+    def _type_char_direct(self, char: str) -> bool:
+        if char == "\n":
+            self.key_action("enter", "press")
+            return True
+        if char == "\r":
+            return True
+        if char == "\t":
+            self.key_action("tab", "press")
+            return True
+        if char == " ":
+            keysym = self._x11.XStringToKeysym(b"space")
+        else:
+            try:
+                encoded = char.encode("utf-8")
+            except UnicodeEncodeError:
+                return False
+            keysym = self._x11.XStringToKeysym(encoded)
+        if keysym == 0:
+            return False
+        keycode = self._x11.XKeysymToKeycode(self._display, keysym)
+        if keycode == 0:
+            return False
+        need_shift = char in self._SHIFT_REQUIRED
+        self._press_keycode(keycode, shift=need_shift)
+        return True
+
+    def _type_via_clipboard(self, text: str) -> None:
+        if not text:
+            return
+        try:
+            previous = clipboard_utils.get_clipboard()
+        except Exception:
+            previous = None
+        try:
+            clipboard_utils.set_clipboard(ClipboardData(kind="text", data=text))
+        except Exception as exc:
+            raise RuntimeError(
+                "Unable to access clipboard for Unicode typing. Install wl-copy or xclip."
+            ) from exc
+        try:
+            self.key_action("ctrl", "down")
+            try:
+                self.key_action("v", "press")
+            finally:
+                self.key_action("ctrl", "up")
+        finally:
+            if previous:
+                try:
+                    clipboard_utils.set_clipboard(previous)
+                except Exception:
+                    pass
+
     def type_text(self, text: str) -> None:
-        for char in text:
-            if char == "\n":
-                self.key_action("enter", "press")
+        for idx, char in enumerate(text):
+            if self._type_char_direct(char):
                 continue
-            if char == "\r":
-                continue
-            if char == "\t":
-                self.key_action("tab", "press")
-                continue
-            if char == " ":
-                keysym = self._x11.XStringToKeysym(b"space")
-            else:
-                keysym = self._x11.XStringToKeysym(char.encode("utf-8"))
-            if keysym == 0:
-                continue
-            keycode = self._x11.XKeysymToKeycode(self._display, keysym)
-            if keycode == 0:
-                continue
-            need_shift = char in self._SHIFT_REQUIRED
-            self._press_keycode(keycode, shift=need_shift)
+            remaining = text[idx:]
+            if remaining:
+                self._type_via_clipboard(remaining)
+            return
 
     def key_action(self, key: str, action: str) -> None:
         keysym_name = self._KEY_MAP.get(key)
