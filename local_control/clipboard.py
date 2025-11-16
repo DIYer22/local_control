@@ -14,7 +14,7 @@ import tempfile
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Union
 
 OS_NAME = platform.system()
 
@@ -307,12 +307,12 @@ def _linux_set_image(data: ClipboardData) -> None:
 
 def _run_command_capture(
     command: Iterable[str],
-    input_data: Optional[bytes | str] = None,
+    input_data: Optional[Union[bytes, str]] = None,
     text_mode: bool = False,
     timeout: int = 5,
-) -> Optional[str | bytes]:
+) -> Optional[Union[str, bytes]]:
     if text_mode and isinstance(input_data, bytes):
-        input_value: Optional[bytes | str] = input_data.decode("utf-8", errors="ignore")
+        input_value: Optional[Union[bytes, str]] = input_data.decode("utf-8", errors="ignore")
     else:
         input_value = input_data
     try:
