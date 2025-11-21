@@ -9,6 +9,8 @@ import logging
 import os
 import socket
 import sys
+import threading
+import time
 from typing import Iterable, List, Optional
 
 from .app import create_app
@@ -76,7 +78,7 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
     _install_log_filters()
     app = create_app()
     if not args.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
-        _display_banner(args.host, args.port)
+        _schedule_banner(args.host, args.port)
     app.run(host=args.host, port=args.port, debug=args.debug)
 
 
@@ -99,6 +101,14 @@ def _display_banner(host: str, port: int) -> None:
 
     qr_section = f"\nScan to connect:\n{qr_text}"
     print(qr_section, flush=True)
+
+
+def _schedule_banner(host: str, port: int, delay: float = 0.1) -> None:
+    def _runner() -> None:
+        time.sleep(delay)
+        _display_banner(host, port)
+
+    threading.Thread(target=_runner, name="banner-delay", daemon=True).start()
 
 
 class _MouseMoveFilter(logging.Filter):
