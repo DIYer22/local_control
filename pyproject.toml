@@ -14,7 +14,7 @@ authors = [
 ]
 dependencies = [
   "flask>=2.2",
-  "qrcode>=7.4,<8"
+  "qrcode>=7.4"
 ]
 
 [project.urls]
