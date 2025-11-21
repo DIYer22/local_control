@@ -73,6 +73,7 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
         return
 
     logging.basicConfig(level=logging.INFO)
+    _install_log_filters()
     app = create_app()
     if not args.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
         _display_banner(args.host, args.port)
@@ -89,7 +90,6 @@ def _display_banner(host: str, port: int) -> None:
     header_lines.extend(f"  • {url}" for url in urls)
     header_text = "\n".join(header_lines)
     print(header_text, flush=True)
-    LOG.info(header_text)
 
     try:
         qr_text = render_text(primary)
@@ -99,7 +99,16 @@ def _display_banner(host: str, port: int) -> None:
 
     qr_section = f"\nScan to connect:\n{qr_text}"
     print(qr_section, flush=True)
-    LOG.info(qr_section)
+
+
+class _MouseMoveFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover - logging
+        message = record.getMessage()
+        return '"POST /api/mouse/move' not in message and '"POST /api/mouse/scroll' not in message
+
+
+def _install_log_filters() -> None:
+    logging.getLogger("werkzeug").addFilter(_MouseMoveFilter())
 
 
 def _candidate_urls(host: str, port: int) -> List[str]:

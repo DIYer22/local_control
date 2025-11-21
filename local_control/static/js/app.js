@@ -273,21 +273,61 @@
     });
   }
 
-  async function syncClipboardToDevice(content) {
-    if (!navigator.clipboard) {
-      setClipboardStatus("Browser clipboard API unavailable; copied content shown in preview only.", "warn");
-      logEvent("Clipboard", "Device clipboard API unavailable");
-      return;
+  async function copyTextToDeviceClipboard(text) {
+    const value = text != null ? String(text) : "";
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(value);
+        return "navigator";
+      } catch (err) {
+        console.warn("Async clipboard writeText failed, falling back to execCommand.", err);
+      }
     }
+    if (!document || !document.body || !document.execCommand) {
+      return null;
+    }
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    textarea.style.pointerEvents = "none";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    try {
+      textarea.focus();
+      textarea.select();
+      const ok = document.execCommand("copy");
+      if (!ok) {
+        throw new Error("execCommand returned false");
+      }
+      return "fallback";
+    } catch (err) {
+      console.warn("document.execCommand copy failed.", err);
+      return null;
+    } finally {
+      document.body.removeChild(textarea);
+    }
+  }
+
+  async function syncClipboardToDevice(content) {
     logEvent("Clipboard", "Syncing host clipboard to device", describeClipboardContent(content));
     try {
       if (content.type === "text") {
-        if (navigator.clipboard.writeText) {
-          await navigator.clipboard.writeText(content.data);
-          setClipboardStatus("Copied host text to this device clipboard.");
-          logEvent("Clipboard", "Device clipboard text updated");
+        const method = await copyTextToDeviceClipboard(content.data);
+        if (!method) {
+          throw new Error("copy failed");
         }
-      } else if (content.type === "image") {
+        setClipboardStatus("Copied host text to this device clipboard.");
+        logEvent("Clipboard", "Device clipboard text updated", { method });
+        return;
+      }
+      if (!navigator.clipboard) {
+        setClipboardStatus("Browser clipboard API unavailable; image copied to preview only.", "warn");
+        logEvent("Clipboard", "Device clipboard API unavailable for image payloads");
+        return;
+      }
+      if (content.type === "image") {
         const mime = content.mime || "image/png";
         const blob = base64ToBlob(content.data, mime);
         if (navigator.clipboard.write && window.ClipboardItem) {
@@ -296,7 +336,10 @@
           setClipboardStatus("Copied host image to this device clipboard.");
           logEvent("Clipboard", "Device clipboard image updated", { mime: blob.type, bytes: blob.size });
         } else {
-          setClipboardStatus("Clipboard image synced to preview. Browser API does not support programmatic image copy.", "warn");
+          setClipboardStatus(
+            "Clipboard image synced to preview. Browser API does not support programmatic image copy.",
+            "warn",
+          );
           logEvent("Clipboard", "Clipboard image sync limited by browser API");
         }
       }
@@ -1269,20 +1312,24 @@
     event.preventDefault();
   }
 
-  trackpad.addEventListener(
-    "wheel",
-    (event) => {
-      if (!authenticated) return;
-      event.preventDefault();
-      const horizontal = event.deltaX;
-      const vertical = -event.deltaY;
-      if (!horizontal && !vertical) return;
-      api("/api/mouse/scroll", { horizontal, vertical }).catch((err) =>
-        console.error("Scroll failed", err),
-      );
-    },
-    { passive: false },
-  );
+  function handleWheelEvent(event) {
+    if (!authenticated) return;
+    const fromTrackpad =
+      event.target === trackpad ||
+      (trackpad && trackpad.contains && trackpad.contains(event.target));
+    if (!fromTrackpad && !isPointerLocked()) {
+      return;
+    }
+    event.preventDefault();
+    const horizontal = event.deltaX;
+    const vertical = -event.deltaY;
+    if (!horizontal && !vertical) return;
+    api("/api/mouse/scroll", { horizontal, vertical }).catch((err) =>
+      console.error("Scroll failed", err),
+    );
+  }
+
+  window.addEventListener("wheel", handleWheelEvent, { passive: false });
 
   trackpad.addEventListener("pointerdown", pointerDown);
   trackpad.addEventListener("pointermove", pointerMove);
@@ -1291,7 +1338,6 @@
   trackpad.addEventListener("contextmenu", (event) => {
     event.preventDefault();
   });
-
   document.addEventListener("pointerlockchange", () => {
     if (isPointerLocked()) {
       pointerActive = true;
