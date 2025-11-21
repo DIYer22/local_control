@@ -21,6 +21,12 @@
   const helpButton = document.getElementById("help-button");
   const helpOverlay = document.getElementById("help-overlay");
   const helpClose = document.getElementById("help-close");
+  const mediaPanel = document.getElementById("media-panel");
+  const mediaToggle = document.getElementById("media-toggle");
+  const mediaContent = document.getElementById("media-content");
+  const mediaButtons = Array.from(document.querySelectorAll("[data-media]"));
+  const mediaVolumeSlider = document.getElementById("media-volume");
+  const mediaStatus = document.getElementById("media-status");
 
   let authenticated = false;
   const EDGE_RELEASE_RATIO = 0.05;
@@ -87,6 +93,25 @@
   let lastClipboardContent = null;
   let lastDeviceClipboardSignature = null;
   const LOG_TEXT_LIMIT = 120;
+  const MEDIA_VOLUME_NEUTRAL = 50;
+  const MEDIA_VOLUME_STEP = 10;
+  const MEDIA_VOLUME_MAX_REPEAT = 6;
+  let mediaExpanded = false;
+  let mediaVolumeLevel = MEDIA_VOLUME_NEUTRAL;
+  let mediaMuted = false;
+  const MEDIA_ACTIONS = {
+    playpause: { label: "Play / Pause", keys: ["mediaplaypause", "f8", "space"] },
+    prev: { label: "Previous", keys: ["mediaprev", "f7", "left"] },
+    next: { label: "Next", keys: ["medianext", "f9", "right"] },
+    esc: { label: "Exit fullscreen", keys: ["esc"] },
+    mute: { label: "Mute", keys: ["volumemute", "f10"] },
+    volumeup: { label: "Volume up", keys: ["volumeup", "f12"] },
+    volumedown: { label: "Volume down", keys: ["volumedown", "f11"] },
+    "arrow-left": { label: "Arrow left", keys: ["left"] },
+    "arrow-right": { label: "Arrow right", keys: ["right"] },
+    "arrow-up": { label: "Arrow up", keys: ["up"] },
+    "arrow-down": { label: "Arrow down", keys: ["down"] },
+  };
 
   function logEvent(topic, message, detail) {
     const timestamp = new Date().toISOString();
@@ -199,6 +224,144 @@
     if (!clipboardStatus) return;
     clipboardStatus.textContent = message || "";
     clipboardStatus.dataset.tone = tone;
+  }
+
+  function setMediaStatus(message, tone = "info") {
+    if (!mediaStatus) return;
+    mediaStatus.textContent = message || "";
+    mediaStatus.dataset.tone = tone;
+  }
+
+  function setMediaExpanded(expanded) {
+    if (!mediaPanel || !mediaToggle || !mediaContent) return;
+    mediaExpanded = expanded;
+    mediaToggle.setAttribute("aria-expanded", String(expanded));
+    mediaContent.hidden = !expanded;
+    mediaContent.setAttribute("aria-hidden", String(!expanded));
+    mediaPanel.classList.toggle("open", expanded);
+  }
+
+  function updateVolumeSliderVisual(value) {
+    if (!mediaVolumeSlider) return;
+    const slider = mediaVolumeSlider;
+    const min = Number(slider.min || 0);
+    const max = Number(slider.max || 100);
+    const percent = Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100));
+    slider.style.setProperty("--value", `${percent}%`);
+  }
+
+  async function applyVolumeLevel(level) {
+    const clamped = Math.min(100, Math.max(0, Math.round(level)));
+    if (!authenticated) {
+      setMediaStatus("Sign in to control volume.", "warn");
+      return false;
+    }
+    try {
+      const response = await api("/api/media/volume", { level: clamped });
+      const serverLevel =
+        response && typeof response.level === "number" ? response.level : clamped;
+      mediaVolumeLevel = serverLevel;
+      if (typeof response?.muted === "boolean") {
+        mediaMuted = response.muted;
+      }
+      if (mediaVolumeSlider) {
+        mediaVolumeSlider.value = String(mediaVolumeLevel);
+        updateVolumeSliderVisual(mediaVolumeLevel);
+      }
+      setMediaStatus(
+        `Volume set to ${Math.round(mediaVolumeLevel)}%${mediaMuted ? " (muted)" : ""}.`,
+      );
+      return true;
+    } catch (err) {
+      console.error("Volume control failed", err);
+      setMediaStatus(err.message || "Volume control unavailable.", "warn");
+      return false;
+    }
+  }
+
+  async function toggleMuteState(forceState) {
+    if (!authenticated) {
+      setMediaStatus("Sign in to control mute.", "warn");
+      return false;
+    }
+    try {
+      const payload = {};
+      if (typeof forceState === "boolean") {
+        payload.state = forceState;
+      }
+      const response = await api("/api/media/mute", payload);
+      mediaMuted = Boolean(response?.muted);
+      setMediaStatus(mediaMuted ? "Muted" : "Sound on");
+      return true;
+    } catch (err) {
+      console.error("Mute control failed", err);
+      setMediaStatus(err.message || "Mute control unavailable.", "warn");
+      return false;
+    }
+  }
+
+  async function triggerMediaAction(action, repeat = 1) {
+    const config = MEDIA_ACTIONS[action];
+    if (!config) {
+      return false;
+    }
+    if (!authenticated) {
+      setMediaStatus("Sign in to control media.", "warn");
+      return false;
+    }
+    const cycles = Math.max(1, Number.isFinite(repeat) ? repeat : 1);
+    let completed = 0;
+    for (let idx = 0; idx < cycles; idx += 1) {
+      let dispatched = false;
+      for (const key of config.keys) {
+        try {
+          await api("/api/keyboard/key", { key, action: "press" });
+          dispatched = true;
+          break;
+        } catch (err) {
+          logEvent("Media", "Key dispatch failed", { action, key, error: err.message });
+        }
+      }
+      if (!dispatched) {
+        setMediaStatus(`Media command failed (${config.label || action}).`, "warn");
+        return false;
+      }
+      completed += 1;
+    }
+    const label = config.label || action;
+    setMediaStatus(completed > 1 ? `${label} ×${completed}` : `${label} sent.`);
+    logEvent("Media", "Media action dispatched", { action, repeat: completed });
+    return true;
+  }
+
+  async function handleVolumeCommit(event) {
+    if (!mediaVolumeSlider) {
+      return;
+    }
+    const raw = Number(event.target.value);
+    if (Number.isNaN(raw)) {
+      return;
+    }
+    const clamped = Math.min(100, Math.max(0, raw));
+    mediaVolumeSlider.value = String(clamped);
+    updateVolumeSliderVisual(clamped);
+    const success = await applyVolumeLevel(clamped);
+    if (!success) {
+      if (mediaVolumeSlider) {
+        mediaVolumeSlider.value = String(mediaVolumeLevel);
+        updateVolumeSliderVisual(mediaVolumeLevel);
+      }
+      const delta = clamped - mediaVolumeLevel;
+      if (!delta) {
+        return;
+      }
+      const steps = Math.max(
+        1,
+        Math.min(MEDIA_VOLUME_MAX_REPEAT, Math.round(Math.abs(delta) / MEDIA_VOLUME_STEP)),
+      );
+      const action = delta > 0 ? "volumeup" : "volumedown";
+      triggerMediaAction(action, steps);
+    }
   }
 
   function setClipboardPreview(content, origin = "host") {
@@ -1330,6 +1493,46 @@
   }
 
   window.addEventListener("wheel", handleWheelEvent, { passive: false });
+
+  if (mediaToggle && mediaContent && mediaPanel) {
+    setMediaExpanded(false);
+    mediaToggle.addEventListener("click", () => {
+      setMediaExpanded(!mediaExpanded);
+    });
+  }
+
+  mediaButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const action = button.dataset.media;
+      if (!action) {
+        return;
+      }
+      if (action === "mute") {
+        toggleMuteState().then((success) => {
+          if (!success) {
+            triggerMediaAction("mute");
+          }
+        });
+        return;
+      }
+      triggerMediaAction(action);
+    });
+  });
+
+  if (mediaVolumeSlider) {
+    mediaVolumeLevel = MEDIA_VOLUME_NEUTRAL;
+    mediaVolumeSlider.value = String(mediaVolumeLevel);
+    updateVolumeSliderVisual(mediaVolumeLevel);
+    mediaVolumeSlider.addEventListener("input", (event) => {
+      const nextValue = Number(event.target.value);
+      updateVolumeSliderVisual(nextValue);
+    });
+    mediaVolumeSlider.addEventListener("change", handleVolumeCommit);
+  }
+
+  if (mediaStatus) {
+    setMediaStatus("");
+  }
 
   trackpad.addEventListener("pointerdown", pointerDown);
   trackpad.addEventListener("pointermove", pointerMove);

@@ -62,6 +62,53 @@
               <button data-click="middle">Middle Click</button>
               <button data-click="double">Double Click</button>
             </div>
+
+            <div class="media-panel" id="media-panel">
+              <button type="button" class="media-toggle" id="media-toggle" aria-expanded="false">
+                <span class="media-toggle-text">
+                  <span class="media-toggle-icon" aria-hidden="true">▸</span>
+                  Media Panel
+                </span>
+                <span class="media-toggle-hint">Volume &amp; playback</span>
+              </button>
+              <div class="media-content" id="media-content" aria-hidden="true">
+                <div class="media-volume">
+                  <span aria-hidden="true">🔈</span>
+                  <input type="range" id="media-volume" min="0" max="100" value="50" />
+                  <span aria-hidden="true">🔊</span>
+                  <button type="button" class="icon-button subtle" data-media="mute" aria-label="Mute audio">
+                    🔇
+                  </button>
+                </div>
+                <div class="media-buttons">
+                  <button type="button" class="media-pill" data-media="prev">
+                    <span class="media-pill-icon">⏮</span>
+                    <span class="media-pill-label">Previous</span>
+                  </button>
+                  <button type="button" class="media-pill accent" data-media="playpause">
+                    <span class="media-pill-icon">⏯</span>
+                    <span class="media-pill-label">Play / Pause</span>
+                  </button>
+                  <button type="button" class="media-pill" data-media="next">
+                    <span class="media-pill-icon">⏭</span>
+                    <span class="media-pill-label">Next</span>
+                  </button>
+                  <button type="button" class="media-pill" data-media="esc">
+                    <span class="media-pill-icon">⎋</span>
+                    <span class="media-pill-label">Exit Fullscreen</span>
+                  </button>
+                </div>
+                <div class="media-directions" aria-label="Directional controls">
+                  <button type="button" data-media="arrow-left" aria-label="Arrow left">◀</button>
+                  <div class="media-direction-vertical">
+                    <button type="button" data-media="arrow-up" aria-label="Arrow up">▲</button>
+                    <button type="button" data-media="arrow-down" aria-label="Arrow down">▼</button>
+                  </div>
+                  <button type="button" data-media="arrow-right" aria-label="Arrow right">▶</button>
+                </div>
+                <p id="media-status" class="hint"></p>
+              </div>
+            </div>
           </div>
 
           <div class="control-panel">

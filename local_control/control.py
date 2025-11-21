@@ -83,6 +83,24 @@ class _WindowsBackend(_BaseBackend):
         "period": 0xBE,
         "slash": 0xBF,
         "grave": 0xC0,
+        "volumemute": 0xAD,
+        "volumedown": 0xAE,
+        "volumeup": 0xAF,
+        "medianext": 0xB0,
+        "mediaprev": 0xB1,
+        "mediaplaypause": 0xB3,
+        "f1": 0x70,
+        "f2": 0x71,
+        "f3": 0x72,
+        "f4": 0x73,
+        "f5": 0x74,
+        "f6": 0x75,
+        "f7": 0x76,
+        "f8": 0x77,
+        "f9": 0x78,
+        "f10": 0x79,
+        "f11": 0x7A,
+        "f12": 0x7B,
     }
 
     _BUTTON_FLAGS = {
@@ -375,6 +393,24 @@ class _DarwinBackend(_BaseBackend):
         "comma": 43,
         "period": 47,
         "slash": 44,
+        "volumeup": 72,
+        "volumedown": 73,
+        "volumemute": 74,
+        "mediaprev": 98,
+        "mediaplaypause": 100,
+        "medianext": 101,
+        "f1": 122,
+        "f2": 120,
+        "f3": 99,
+        "f4": 118,
+        "f5": 96,
+        "f6": 97,
+        "f7": 98,
+        "f8": 100,
+        "f9": 101,
+        "f10": 109,
+        "f11": 103,
+        "f12": 111,
         "0": 29,
         "1": 18,
         "2": 19,
@@ -684,6 +720,24 @@ class _X11Backend(_BaseBackend):
         "period": "period",
         "slash": "slash",
         "grave": "grave",
+        "volumeup": "XF86AudioRaiseVolume",
+        "volumedown": "XF86AudioLowerVolume",
+        "volumemute": "XF86AudioMute",
+        "mediaprev": "XF86AudioPrev",
+        "mediaplaypause": "XF86AudioPlay",
+        "medianext": "XF86AudioNext",
+        "f1": "F1",
+        "f2": "F2",
+        "f3": "F3",
+        "f4": "F4",
+        "f5": "F5",
+        "f6": "F6",
+        "f7": "F7",
+        "f8": "F8",
+        "f9": "F9",
+        "f10": "F10",
+        "f11": "F11",
+        "f12": "F12",
     }
 
     _BUTTON_MAP: Dict[str, int] = {
@@ -1083,3 +1137,61 @@ def unlock_screen() -> None:
         ],
         error_message="Unlock command unavailable on this system.",
     )
+
+
+def _run_osascript(script: str) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("AppleScript (osascript) is unavailable on this system.") from exc
+    except subprocess.CalledProcessError as exc:  # pragma: no cover - mac only
+        message = exc.stderr.strip() or exc.stdout.strip() or "AppleScript command failed."
+        raise RuntimeError(message) from exc
+
+
+def _clamp_volume(value: float) -> int:
+    return int(max(0, min(100, round(value))))
+
+
+def _darwin_set_volume(level: float) -> float:
+    clamped = _clamp_volume(level)
+    _run_osascript(f"set volume output volume {clamped}")
+    return float(clamped)
+
+
+def _darwin_set_mute(state: Optional[bool]) -> bool:
+    if state is None:
+        script = """
+set currentMuted to (output muted of (get volume settings))
+if currentMuted then
+  set volume without output muted
+else
+  set volume with output muted
+end if
+return (output muted of (get volume settings))
+        """.strip()
+    elif state:
+        script = "set volume with output muted\nreturn true"
+    else:
+        script = "set volume without output muted\nreturn false"
+    result = _run_osascript(script)
+    return result.stdout.strip().lower() == "true"
+
+
+def set_volume(level: float) -> float:
+    system = platform.system()
+    if system == "Darwin":
+        return _darwin_set_volume(level)
+    raise RuntimeError("Absolute volume control is unavailable on this system.")
+
+
+def set_mute(state: Optional[bool] = None) -> bool:
+    system = platform.system()
+    if system == "Darwin":
+        return _darwin_set_mute(state)
+    raise RuntimeError("Mute control is unavailable on this system.")

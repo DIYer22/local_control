@@ -257,6 +257,33 @@ def create_app(auth_manager: Optional[AuthManager] = None) -> Flask:
 
         return auth_endpoint(action)
 
+    @app.post("/api/media/volume")
+    def media_volume() -> Response:
+        def action(data: Dict[str, Any]) -> Dict[str, Any]:
+            try:
+                raw_level = float(data.get("level", 0.0))
+            except (TypeError, ValueError):
+                raise ValueError("Volume level must be a number between 0 and 100.")
+            level = max(0.0, min(100.0, raw_level))
+            actual = control.set_volume(level)
+            return {"status": "ok", "level": actual}
+
+        return auth_endpoint(action)
+
+    @app.post("/api/media/mute")
+    def media_mute() -> Response:
+        def action(data: Dict[str, Any]) -> Dict[str, Any]:
+            state = data.get("state")
+            desired: Optional[bool]
+            if state is None:
+                desired = None
+            else:
+                desired = bool(state)
+            muted = control.set_mute(desired)
+            return {"status": "ok", "muted": muted}
+
+        return auth_endpoint(action)
+
     @app.get("/api/clipboard")
     def clipboard_read() -> Response:
         user, fresh_token = require_auth()
