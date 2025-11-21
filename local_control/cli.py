@@ -15,6 +15,8 @@ from .app import create_app
 from .startup import StartupManager, StartupError
 from .utils.terminal_qr import render_text
 
+LOG = logging.getLogger(__name__)
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -83,18 +85,21 @@ def _display_banner(host: str, port: int) -> None:
         return
     primary = next((url for url in urls if not url.startswith("http://127.")), urls[0])
 
-    print("Local Control server ready. Reach it at:", flush=True)
-    for url in urls:
-        print(f"  • {url}", flush=True)
+    header_lines = ["Local Control server ready. Reach it at:"]
+    header_lines.extend(f"  • {url}" for url in urls)
+    header_text = "\n".join(header_lines)
+    print(header_text, flush=True)
+    LOG.info(header_text)
 
     try:
         qr_text = render_text(primary)
     except Exception as exc:  # pragma: no cover - cosmetic
-        logging.debug("Failed to render QR code: %s", exc)
+        LOG.warning("Failed to render QR code: %s", exc)
         return
 
-    print("\nScan to connect:", flush=True)
-    print(qr_text, flush=True)
+    qr_section = f"\nScan to connect:\n{qr_text}"
+    print(qr_section, flush=True)
+    LOG.info(qr_section)
 
 
 def _candidate_urls(host: str, port: int) -> List[str]:

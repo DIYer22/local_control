@@ -4,28 +4,28 @@ Helpers for rendering QR codes as terminal-friendly ASCII art.
 
 from __future__ import annotations
 
+import io
 from typing import Iterable
 
-from . import qrcodegen
-
-_DARK = "██"
-_LIGHT = "  "
+import qrcode
+from qrcode.constants import ERROR_CORRECT_L
 
 
 def render_text(data: str) -> str:
     """
-    Render a QR code pointing to ``data`` using double-width ASCII blocks.
+    Render a QR code pointing to ``data`` using the qrcode package's ASCII output.
     Returns the multi-line string that can be printed directly.
     """
-    qr = qrcodegen.QrCode.encode_text(data, qrcodegen.QrCode.Ecc.LOW)
-    border = 2
-    lines = []
-    for y in range(-border, qr.size + border):
-        row = []
-        for x in range(-border, qr.size + border):
-            row.append(_DARK if qr.get_module(x, y) else _LIGHT)
-        lines.append("".join(row).rstrip())
-    return "\n".join(lines)
+    qr = qrcode.QRCode(
+        error_correction=ERROR_CORRECT_L,
+        box_size=1,
+        border=2,
+    )
+    qr.add_data(data)
+    qr.make(fit=True)
+    buffer = io.StringIO()
+    qr.print_ascii(out=buffer, invert=True)
+    return buffer.getvalue().strip("\n")
 
 
 def iter_lines(data: str) -> Iterable[str]:

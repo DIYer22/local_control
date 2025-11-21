@@ -13,7 +13,8 @@ authors = [
   {name = "DIYer22"}
 ]
 dependencies = [
-  "flask>=2.2"
+  "flask>=2.2",
+  "qrcode>=7.4,<8"
 ]
 
 [project.urls]
